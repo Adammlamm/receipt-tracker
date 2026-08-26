@@ -18,6 +18,13 @@ export interface ReceiptItem {
   personIds: string[]; // hydrated from item_splits
 }
 
+export interface Group {
+  id: string;
+  user_id: string;
+  name: string;
+  memberIds: string[];
+}
+
 export interface Receipt {
   id: string;
   user_id: string;
@@ -26,8 +33,10 @@ export interface Receipt {
   subtotal: number;
   tax: number;
   tip: number;
+  discount: number;
   total: number;
   tax_tip_method: TaxTipMethod;
+  split_mode: "itemized" | "even";
   image_path: string | null;
   items: ReceiptItem[];
 }

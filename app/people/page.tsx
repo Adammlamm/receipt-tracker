@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Users2 } from "lucide-react";
 import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
 import { allocatePersonPayments } from "@/lib/split";
 import BottomNav from "@/components/BottomNav";
@@ -19,6 +19,9 @@ export default async function PeoplePage() {
     <div>
       <div className="h-14 flex items-center px-5 border-b border-line">
         <h1 className="font-semibold text-[15px] text-ink flex-1">People</h1>
+        <Link href="/groups" className="flex items-center gap-1 text-accent text-[13px] font-semibold">
+          <Users2 size={15} /> Groups
+        </Link>
       </div>
 
       <div className="px-5 pt-4">

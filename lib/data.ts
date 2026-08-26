@@ -1,5 +1,21 @@
 import { createClient } from "@/lib/supabase/server";
-import { Person, Receipt, Payment } from "@/lib/types";
+import { Person, Receipt, Payment, Group } from "@/lib/types";
+
+export async function loadGroups(): Promise<Group[]> {
+  const supabase = createClient();
+  const { data: groups } = await supabase.from("groups").select("*").order("name");
+  if (!groups || groups.length === 0) return [];
+
+  const { data: members } = await supabase
+    .from("group_members")
+    .select("*")
+    .in("group_id", groups.map((g) => g.id));
+
+  return groups.map((g) => ({
+    ...g,
+    memberIds: (members ?? []).filter((m) => m.group_id === g.id).map((m) => m.person_id),
+  }));
+}
 
 export async function loadPeople(): Promise<Person[]> {
   const supabase = createClient();

@@ -1,3 +1,282 @@
+#!/bin/bash
+set -e
+echo "Applying receipt-tracker updates..."
+mkdir -p app/api/scan-receipt app/groups
+
+mkdir -p $(dirname 'app/api/scan-receipt/route.ts')
+cat > 'app/api/scan-receipt/route.ts' << 'FILEEOF'
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+const SYSTEM_PROMPT = `You read restaurant/store receipts from photos and extract structured data.
+Return ONLY valid JSON, no prose, no markdown fences, matching exactly this shape:
+
+{
+  "merchant": string,
+  "date": string | null,       // YYYY-MM-DD if you can read it, else null
+  "items": [
+    { "name": string, "quantity": number, "unit_price": number, "category": "Food" | "Drinks" | "Other" }
+  ],
+  "subtotal": number | null,
+  "tax": number | null,
+  "tip": number | null,
+  "discount": number | null,   // positive number representing amount subtracted, 0 if none
+  "total": number | null
+}
+
+Rules:
+- "unit_price" is the price for ONE unit of that item (if the receipt shows a line total for multiple quantity, divide it).
+- Guess "category" per item: alcohol/beer/wine/cocktails -> "Drinks", soda/coffee/juice/water are also "Drinks", entrees/appetizers/sides -> "Food", anything else (fees, misc) -> "Other".
+- If a value truly isn't visible on the receipt, use null rather than guessing.
+- Do not include currency symbols in numbers.
+- Respond with raw JSON only.`;
+
+export async function POST(request: Request) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "Receipt scanning isn't configured yet (missing ANTHROPIC_API_KEY)." },
+      { status: 500 }
+    );
+  }
+
+  const { imageBase64, mediaType } = await request.json();
+  if (!imageBase64) {
+    return NextResponse.json({ error: "No image provided." }, { status: 400 });
+  }
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: { type: "base64", media_type: mediaType || "image/jpeg", data: imageBase64 },
+              },
+              { type: "text", text: "Extract this receipt into the JSON shape described." },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("Anthropic API error:", errText);
+      return NextResponse.json({ error: "Receipt scan failed. Try entering it manually." }, { status: 502 });
+    }
+
+    const data = await res.json();
+    const textBlock = data.content?.find((b: any) => b.type === "text");
+    if (!textBlock) {
+      return NextResponse.json({ error: "Couldn't read a response from the scanner." }, { status: 502 });
+    }
+
+    const cleaned = textBlock.text.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return NextResponse.json(parsed);
+  } catch (err) {
+    console.error("scan-receipt error:", err);
+    return NextResponse.json({ error: "Receipt scan failed. Try entering it manually." }, { status: 500 });
+  }
+}
+FILEEOF
+
+mkdir -p $(dirname 'app/groups/page.tsx')
+cat > 'app/groups/page.tsx' << 'FILEEOF'
+import { loadPeople, loadGroups } from "@/lib/data";
+import BottomNav from "@/components/BottomNav";
+import GroupsManager from "./GroupsManager";
+
+export default async function GroupsPage() {
+  const [people, groups] = await Promise.all([loadPeople(), loadGroups()]);
+
+  return (
+    <div>
+      <div className="h-14 flex items-center px-5 border-b border-line">
+        <h1 className="font-semibold text-[15px] text-ink flex-1">Groups</h1>
+      </div>
+      <div className="px-5 pt-4 pb-8">
+        <p className="text-[13px] text-muted mb-4">
+          Groups let you assign a whole table or crowd to an item in one tap — like "Drinkers" or "Table 2".
+        </p>
+        <GroupsManager people={people} initialGroups={groups} />
+      </div>
+      <BottomNav />
+    </div>
+  );
+}
+FILEEOF
+
+mkdir -p $(dirname 'app/groups/GroupsManager.tsx')
+cat > 'app/groups/GroupsManager.tsx' << 'FILEEOF'
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Plus, X, Pencil, Trash2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { Person, Group } from "@/lib/types";
+
+export default function GroupsManager({ people, initialGroups }: { people: Person[]; initialGroups: Group[] }) {
+  const [groups, setGroups] = useState(initialGroups);
+  const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
+  const router = useRouter();
+  const supabase = createClient();
+
+  function startCreate() {
+    setCreating(true);
+    setEditingId(null);
+    setName("");
+    setMemberIds([]);
+  }
+
+  function startEdit(g: Group) {
+    setEditingId(g.id);
+    setCreating(false);
+    setName(g.name);
+    setMemberIds(g.memberIds);
+  }
+
+  function toggleMember(id: string) {
+    setMemberIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  }
+
+  async function save() {
+    if (!name.trim()) return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+
+    if (editingId) {
+      await supabase.from("groups").update({ name: name.trim() }).eq("id", editingId);
+      await supabase.from("group_members").delete().eq("group_id", editingId);
+      if (memberIds.length) {
+        await supabase.from("group_members").insert(memberIds.map((person_id) => ({ group_id: editingId, person_id })));
+      }
+    } else {
+      const { data: group } = await supabase.from("groups").insert({ user_id: user.id, name: name.trim() }).select().single();
+      if (group && memberIds.length) {
+        await supabase.from("group_members").insert(memberIds.map((person_id) => ({ group_id: group.id, person_id })));
+      }
+    }
+
+    setCreating(false);
+    setEditingId(null);
+    router.refresh();
+    const { data: freshGroups } = await supabase.from("groups").select("*").order("name");
+    const { data: freshMembers } = await supabase.from("group_members").select("*");
+    setGroups(
+      (freshGroups ?? []).map((g) => ({
+        ...g,
+        memberIds: (freshMembers ?? []).filter((m) => m.group_id === g.id).map((m) => m.person_id),
+      }))
+    );
+  }
+
+  async function remove(id: string) {
+    if (!confirm("Delete this group?")) return;
+    await supabase.from("groups").delete().eq("id", id);
+    setGroups(groups.filter((g) => g.id !== id));
+  }
+
+  const editorOpen = creating || editingId !== null;
+
+  return (
+    <div>
+      {!editorOpen && (
+        <button
+          onClick={startCreate}
+          className="w-full rounded-xl border-2 border-dashed border-line py-3 flex items-center justify-center gap-1.5 text-[13px] font-semibold text-accent mb-4"
+        >
+          <Plus size={16} /> New group
+        </button>
+      )}
+
+      {editorOpen && (
+        <div className="bg-white rounded-xl border border-line p-3.5 mb-4">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Group name, e.g. Drinkers"
+            className="w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] outline-none focus:ring-2 focus:ring-accent/40 mb-3"
+          />
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Members</p>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {people.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => toggleMember(p.id)}
+                className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${
+                  memberIds.includes(p.id) ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"
+                }`}
+              >
+                {p.name}
+              </button>
+            ))}
+            {people.length === 0 && <p className="text-[13px] text-muted">Add people first, from the People tab.</p>}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={save} className="flex-1 rounded-xl bg-accent text-white font-semibold py-2.5 text-[14px]">
+              Save group
+            </button>
+            <button
+              onClick={() => {
+                setCreating(false);
+                setEditingId(null);
+              }}
+              className="px-4 rounded-xl bg-[#F0EDE1] text-[#5B5748] font-semibold py-2.5 text-[14px]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {groups.map((g) => (
+          <div key={g.id} className="bg-white rounded-xl border border-line px-4 py-3 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-[14px] font-medium text-ink">{g.name}</p>
+              <p className="text-[12px] text-muted truncate">
+                {g.memberIds.map((id) => people.find((p) => p.id === id)?.name).filter(Boolean).join(", ") || "No members"}
+              </p>
+            </div>
+            <button onClick={() => startEdit(g)} className="p-2 rounded-full active:bg-[#F5F3EC]">
+              <Pencil size={15} className="text-muted" />
+            </button>
+            <button onClick={() => remove(g.id)} className="p-2 rounded-full active:bg-[#FBEDEA]">
+              <Trash2 size={15} className="text-owe" />
+            </button>
+          </div>
+        ))}
+        {groups.length === 0 && !editorOpen && <p className="text-[13px] text-muted py-2">No groups yet.</p>}
+      </div>
+    </div>
+  );
+}
+FILEEOF
+
+mkdir -p $(dirname 'app/receipts/new/page.tsx')
+cat > 'app/receipts/new/page.tsx' << 'FILEEOF'
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -580,3 +859,410 @@ export default function AddReceiptPage() {
     </div>
   );
 }
+FILEEOF
+
+mkdir -p $(dirname 'app/receipts/[id]/page.tsx')
+cat > 'app/receipts/[id]/page.tsx' << 'FILEEOF'
+import Link from "next/link";
+import { loadPeople, loadReceipt, receiptImageUrl } from "@/lib/data";
+import { computeReceiptShares } from "@/lib/split";
+import DeleteReceiptButton from "./DeleteReceiptButton";
+
+function money(n: number) {
+  return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+function fmtDate(iso: string) {
+  return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+export default async function ReceiptDetailPage({ params }: { params: { id: string } }) {
+  const [receipt, people] = await Promise.all([loadReceipt(params.id), loadPeople()]);
+  if (!receipt) return <p className="p-5 text-muted text-sm">This receipt was removed.</p>;
+
+  const imageUrl = await receiptImageUrl(receipt.image_path);
+  const shares = computeReceiptShares(receipt);
+  const nameFor = (id: string) => people.find((p) => p.id === id)?.name ?? "—";
+
+  return (
+    <div>
+      <div className="h-14 flex items-center px-5 border-b border-line">
+        <Link href="/receipts" className="text-[13px] text-muted">Back</Link>
+        <h1 className="flex-1 text-center font-semibold text-[15px] text-ink truncate px-2">{receipt.merchant}</h1>
+        <DeleteReceiptButton receiptId={receipt.id} imagePath={receipt.image_path} />
+      </div>
+
+      <div className="px-5 pt-4">
+        {imageUrl && <img src={imageUrl} alt="Receipt" className="w-full rounded-xl mb-4 border border-line" />}
+        <p className="text-[12px] text-muted mb-4">{fmtDate(receipt.date)}</p>
+
+        <div className="bg-white rounded-xl border border-line p-4 mb-5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Items</p>
+          {receipt.items.map((it) => (
+            <div key={it.id} className="py-1.5">
+              <div className="flex justify-between text-[14px] text-[#3A382F]">
+                <span>{it.name}</span>
+                <span className="font-mono">{money(it.price)}</span>
+              </div>
+              <p className="text-[11px] text-[#A29C8B]">{it.category} · {it.personIds.map(nameFor).join(", ")}</p>
+            </div>
+          ))}
+          <div className="border-t border-[#EDE9DC] mt-2 pt-2 space-y-1">
+            <div className="flex justify-between text-[14px]"><span>Subtotal</span><span className="font-mono">{money(receipt.subtotal)}</span></div>
+            <div className="flex justify-between text-[14px]"><span>Tax</span><span className="font-mono">{money(receipt.tax)}</span></div>
+            <div className="flex justify-between text-[14px]"><span>Tip</span><span className="font-mono">{money(receipt.tip)}</span></div>
+            {receipt.discount > 0 && <div className="flex justify-between text-[14px] text-accent"><span>Discount</span><span className="font-mono">-{money(receipt.discount)}</span></div>}
+            <div className="flex justify-between text-[14px] font-semibold"><span>Total</span><span className="font-mono">{money(receipt.total)}</span></div>
+          </div>
+        </div>
+
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Who owes what</p>
+        <div className="space-y-2 mb-8">
+          {Object.entries(shares).map(([pid, s]) => (
+            <Link key={pid} href={`/people/${pid}`} className="w-full bg-white rounded-xl border border-line px-4 py-3 flex items-center justify-between">
+              <span className="text-[14px] font-medium text-ink">{nameFor(pid)}</span>
+              <span className="font-mono text-[14px] font-semibold text-ink">{money(s.total)}</span>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+FILEEOF
+
+mkdir -p $(dirname 'app/people/page.tsx')
+cat > 'app/people/page.tsx' << 'FILEEOF'
+import Link from "next/link";
+import { ChevronRight, Users2 } from "lucide-react";
+import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
+import { allocatePersonPayments } from "@/lib/split";
+import BottomNav from "@/components/BottomNav";
+import AddPersonForm from "./AddPersonForm";
+
+function money(n: number) {
+  return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+export default async function PeoplePage() {
+  const [people, receipts, payments] = await Promise.all([loadPeople(), loadReceipts(), loadPayments()]);
+  const balances = people
+    .map((p) => ({ person: p, ...allocatePersonPayments(p.id, receipts, payments) }))
+    .sort((a, b) => b.totalRemaining - a.totalRemaining);
+
+  return (
+    <div>
+      <div className="h-14 flex items-center px-5 border-b border-line">
+        <h1 className="font-semibold text-[15px] text-ink flex-1">People</h1>
+        <Link href="/groups" className="flex items-center gap-1 text-accent text-[13px] font-semibold">
+          <Users2 size={15} /> Groups
+        </Link>
+      </div>
+
+      <div className="px-5 pt-4">
+        <AddPersonForm />
+      </div>
+
+      <div className="px-5 pt-4 space-y-2">
+        {balances.length === 0 && <p className="text-[13px] text-muted py-3">No people yet.</p>}
+        {balances.map(({ person, totalRemaining }) => (
+          <Link
+            key={person.id}
+            href={`/people/${person.id}`}
+            className="w-full bg-white rounded-xl border border-line px-4 py-3 flex items-center gap-3"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="text-[14px] font-medium text-ink">{person.name}</p>
+              <p className="text-[12px] text-muted">{totalRemaining > 0.005 ? "Owes you" : "Settled up"}</p>
+            </div>
+            <span className={`font-mono text-[14px] font-semibold ${totalRemaining > 0.005 ? "text-owe" : "text-muted"}`}>
+              {money(totalRemaining)}
+            </span>
+            <ChevronRight size={16} className="text-[#C7C1AF]" />
+          </Link>
+        ))}
+      </div>
+
+      <BottomNav />
+    </div>
+  );
+}
+FILEEOF
+
+mkdir -p $(dirname 'lib/types.ts')
+cat > 'lib/types.ts' << 'FILEEOF'
+export type Category = "Food" | "Drinks" | "Other";
+export type TaxTipMethod = "proportional" | "equal";
+export type PaymentMethod = "Venmo" | "Zelle" | "Apple Cash" | "Cash" | "PayPal" | "Other";
+
+export interface Person {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface ReceiptItem {
+  id: string;
+  receipt_id: string;
+  name: string;
+  price: number;
+  category: Category;
+  personIds: string[]; // hydrated from item_splits
+}
+
+export interface Group {
+  id: string;
+  user_id: string;
+  name: string;
+  memberIds: string[];
+}
+
+export interface Receipt {
+  id: string;
+  user_id: string;
+  merchant: string;
+  date: string; // ISO date
+  subtotal: number;
+  tax: number;
+  tip: number;
+  discount: number;
+  total: number;
+  tax_tip_method: TaxTipMethod;
+  split_mode: "itemized" | "even";
+  image_path: string | null;
+  items: ReceiptItem[];
+}
+
+export interface Payment {
+  id: string;
+  user_id: string;
+  person_id: string;
+  receipt_id: string | null;
+  amount: number;
+  payment_date: string;
+  payment_method: PaymentMethod;
+}
+FILEEOF
+
+mkdir -p $(dirname 'lib/data.ts')
+cat > 'lib/data.ts' << 'FILEEOF'
+import { createClient } from "@/lib/supabase/server";
+import { Person, Receipt, Payment, Group } from "@/lib/types";
+
+export async function loadGroups(): Promise<Group[]> {
+  const supabase = createClient();
+  const { data: groups } = await supabase.from("groups").select("*").order("name");
+  if (!groups || groups.length === 0) return [];
+
+  const { data: members } = await supabase
+    .from("group_members")
+    .select("*")
+    .in("group_id", groups.map((g) => g.id));
+
+  return groups.map((g) => ({
+    ...g,
+    memberIds: (members ?? []).filter((m) => m.group_id === g.id).map((m) => m.person_id),
+  }));
+}
+
+export async function loadPeople(): Promise<Person[]> {
+  const supabase = createClient();
+  const { data } = await supabase.from("people").select("*").order("name");
+  return data ?? [];
+}
+
+export async function loadPayments(): Promise<Payment[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("payments")
+    .select("*")
+    .order("payment_date", { ascending: false });
+  return data ?? [];
+}
+
+/** Fetches all receipts for the signed-in user, each hydrated with items + who split them. */
+export async function loadReceipts(): Promise<Receipt[]> {
+  const supabase = createClient();
+
+  const { data: receipts } = await supabase
+    .from("receipts")
+    .select("*")
+    .order("date", { ascending: false });
+
+  if (!receipts || receipts.length === 0) return [];
+
+  const receiptIds = receipts.map((r) => r.id);
+
+  const { data: items } = await supabase
+    .from("receipt_items")
+    .select("*")
+    .in("receipt_id", receiptIds);
+
+  const itemIds = (items ?? []).map((i) => i.id);
+
+  const { data: splits } = itemIds.length
+    ? await supabase.from("item_splits").select("*").in("item_id", itemIds)
+    : { data: [] };
+
+  return receipts.map((r) => ({
+    ...r,
+    items: (items ?? [])
+      .filter((i) => i.receipt_id === r.id)
+      .map((i) => ({
+        ...i,
+        personIds: (splits ?? []).filter((s) => s.item_id === i.id).map((s) => s.person_id),
+      })),
+  }));
+}
+
+export async function loadReceipt(id: string): Promise<Receipt | null> {
+  const supabase = createClient();
+  const { data: receipt } = await supabase.from("receipts").select("*").eq("id", id).single();
+  if (!receipt) return null;
+
+  const { data: items } = await supabase.from("receipt_items").select("*").eq("receipt_id", id);
+  const itemIds = (items ?? []).map((i) => i.id);
+  const { data: splits } = itemIds.length
+    ? await supabase.from("item_splits").select("*").in("item_id", itemIds)
+    : { data: [] };
+
+  return {
+    ...receipt,
+    items: (items ?? []).map((i) => ({
+      ...i,
+      personIds: (splits ?? []).filter((s) => s.item_id === i.id).map((s) => s.person_id),
+    })),
+  };
+}
+
+/** The "receipts" storage bucket is private, so image URLs must be signed. */
+export async function receiptImageUrl(path: string | null): Promise<string | null> {
+  if (!path) return null;
+  const supabase = createClient();
+  const { data } = await supabase.storage.from("receipts").createSignedUrl(path, 60 * 60);
+  return data?.signedUrl ?? null;
+}
+FILEEOF
+
+mkdir -p $(dirname 'lib/split.ts')
+cat > 'lib/split.ts' << 'FILEEOF'
+import { Payment, Receipt } from "./types";
+
+export interface PersonShare {
+  food: number;
+  drinks: number;
+  other: number;
+  itemSubtotal: number;
+  taxTip: number;
+  total: number;
+}
+
+/** Per-person breakdown of a single receipt: item costs + their share of tax/tip. */
+export function computeReceiptShares(receipt: Receipt): Record<string, PersonShare> {
+  const shares: Record<string, PersonShare> = {};
+  const ensure = (pid: string) => {
+    if (!shares[pid]) {
+      shares[pid] = { food: 0, drinks: 0, other: 0, itemSubtotal: 0, taxTip: 0, total: 0 };
+    }
+    return shares[pid];
+  };
+
+  let itemsTotal = 0;
+  for (const item of receipt.items ?? []) {
+    const people = item.personIds ?? [];
+    if (people.length === 0) continue;
+    const per = item.price / people.length;
+    itemsTotal += item.price;
+    for (const pid of people) {
+      const s = ensure(pid);
+      s.itemSubtotal += per;
+      if (item.category === "Food") s.food += per;
+      else if (item.category === "Drinks") s.drinks += per;
+      else s.other += per;
+    }
+  }
+
+  const taxTip = (Number(receipt.tax) || 0) + (Number(receipt.tip) || 0) - (Number(receipt.discount) || 0);
+  const participantIds = Object.keys(shares);
+
+  if (receipt.tax_tip_method === "equal" && participantIds.length > 0) {
+    const each = taxTip / participantIds.length;
+    participantIds.forEach((pid) => (shares[pid].taxTip = each));
+  } else {
+    participantIds.forEach((pid) => {
+      const portion = itemsTotal > 0 ? shares[pid].itemSubtotal / itemsTotal : 0;
+      shares[pid].taxTip = portion * taxTip;
+    });
+  }
+
+  participantIds.forEach((pid) => {
+    shares[pid].total = shares[pid].itemSubtotal + shares[pid].taxTip;
+  });
+
+  return shares;
+}
+
+export interface PersonAllocation {
+  personReceipts: { receipt: Receipt; owed: number }[];
+  remainingMap: Record<string, number>;
+  paidMap: Record<string, number>;
+  totalOwed: number;
+  totalPaid: number;
+  totalRemaining: number;
+}
+
+/**
+ * Allocates a person's payments (some linked to a specific receipt, some general)
+ * across their receipts, oldest first, to work out what's still outstanding.
+ */
+export function allocatePersonPayments(
+  personId: string,
+  receipts: Receipt[],
+  payments: Payment[]
+): PersonAllocation {
+  const personReceipts = receipts
+    .map((r) => {
+      const shares = computeReceiptShares(r);
+      const owed = shares[personId]?.total ?? 0;
+      return owed > 0 ? { receipt: r, owed } : null;
+    })
+    .filter((x): x is { receipt: Receipt; owed: number } => x !== null)
+    .sort((a, b) => (a.receipt.date < b.receipt.date ? -1 : 1));
+
+  const remainingMap: Record<string, number> = {};
+  personReceipts.forEach(({ receipt, owed }) => (remainingMap[receipt.id] = owed));
+
+  const personPayments = payments.filter((p) => p.person_id === personId);
+
+  let generalPool = 0;
+  personPayments.forEach((p) => {
+    if (p.receipt_id && remainingMap[p.receipt_id] !== undefined) {
+      remainingMap[p.receipt_id] = Math.max(0, remainingMap[p.receipt_id] - p.amount);
+    } else {
+      generalPool += p.amount;
+    }
+  });
+
+  for (const { receipt } of personReceipts) {
+    if (generalPool <= 0) break;
+    const bal = remainingMap[receipt.id];
+    const take = Math.min(bal, generalPool);
+    remainingMap[receipt.id] = bal - take;
+    generalPool -= take;
+  }
+
+  const paidMap: Record<string, number> = {};
+  personReceipts.forEach(({ receipt, owed }) => {
+    paidMap[receipt.id] = owed - remainingMap[receipt.id];
+  });
+
+  const totalOwed = personReceipts.reduce((s, r) => s + r.owed, 0);
+  const totalPaid = personPayments.reduce((s, p) => s + p.amount, 0);
+  const totalRemaining = personReceipts.reduce((s, r) => s + remainingMap[r.receipt.id], 0);
+
+  return { personReceipts, remainingMap, paidMap, totalOwed, totalPaid, totalRemaining };
+}
+FILEEOF
+
+echo "All files updated."
+echo "Now run: git add . && git commit -m \"Add AI scanning, groups, reconciliation\" && git push"
