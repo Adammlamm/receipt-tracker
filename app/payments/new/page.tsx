@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { allocatePersonPayments } from "@/lib/split";
@@ -13,6 +13,14 @@ function money(n: number) {
 }
 
 export default function RecordPaymentPage() {
+  return (
+    <Suspense fallback={null}>
+      <RecordPaymentForm />
+    </Suspense>
+  );
+}
+
+function RecordPaymentForm() {
   const router = useRouter();
   const params = useSearchParams();
   const supabase = createClient();
