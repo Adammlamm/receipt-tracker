@@ -297,7 +297,7 @@ export default function AddReceiptPage() {
 
       {phase === "capture" && (
         <div className="px-5 pt-4">
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} />
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
           <button
             onClick={() => fileRef.current?.click()}
             disabled={scanning}
