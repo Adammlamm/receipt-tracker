@@ -2,6 +2,7 @@ import Link from "next/link";
 import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
 import { allocatePersonPayments } from "@/lib/split";
 import BottomNav from "@/components/BottomNav";
+import PersonActions from "./PersonActions";
 
 function money(n: number) {
   return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -27,17 +28,28 @@ export default async function PersonDetailPage({ params }: { params: { id: strin
       </div>
 
       <div className="px-5 pt-5">
-        <p className="text-[12px] text-muted">Total outstanding</p>
-        <p className={`font-mono text-[26px] font-semibold mb-6 ${totalRemaining > 0.005 ? "text-owe" : "text-accent"}`}>
-          {money(totalRemaining)}
-        </p>
+        {person.is_self ? (
+          <div className="mb-6">
+            <span className="text-[11px] font-semibold text-accent bg-[#EFF7F3] px-2 py-1 rounded-full">This is you</span>
+            <p className="text-[13px] text-muted mt-2">You don't owe yourself — your share of receipts is already excluded from totals.</p>
+          </div>
+        ) : (
+          <>
+            <p className="text-[12px] text-muted">Total outstanding</p>
+            <p className={`font-mono text-[26px] font-semibold mb-6 ${totalRemaining > 0.005 ? "text-owe" : "text-accent"}`}>
+              {money(totalRemaining)}
+            </p>
 
-        <Link
-          href={`/payments/new?personId=${person.id}`}
-          className="block text-center rounded-xl bg-accent text-white font-semibold py-3.5 mb-7"
-        >
-          Record payment
-        </Link>
+            <Link
+              href={`/payments/new?personId=${person.id}`}
+              className="block text-center rounded-xl bg-accent text-white font-semibold py-3.5 mb-7"
+            >
+              Record payment
+            </Link>
+          </>
+        )}
+
+        <PersonActions person={person} />
 
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Receipts</p>
         <div className="space-y-2 mb-8">

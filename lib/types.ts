@@ -2,11 +2,15 @@ export type Category = "Food" | "Drinks" | "Other";
 export type TaxTipMethod = "proportional" | "equal";
 export type PaymentMethod = "Venmo" | "Zelle" | "Apple Cash" | "Cash" | "PayPal" | "Other";
 
+export type ReceiptCategory = "Dining" | "Trips" | "Roommates/Home" | "Transportation" | "Other";
+
 export interface Person {
   id: string;
   user_id: string;
   name: string;
   is_self: boolean;
+  preferred_payment_method: PaymentMethod | null;
+  payment_handle: string | null;
   created_at: string;
 }
 
@@ -40,6 +44,7 @@ export interface Receipt {
   total: number;
   tax_tip_method: TaxTipMethod;
   split_mode: "itemized" | "even";
+  category: ReceiptCategory | null;
   image_path: string | null;
   items: ReceiptItem[];
 }

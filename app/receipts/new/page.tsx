@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { Camera, Plus, Trash2, X, Sparkles, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { computeReceiptShares } from "@/lib/split";
-import { Category, Person, Group, TaxTipMethod } from "@/lib/types";
+import { Category, Person, Group, TaxTipMethod, ReceiptCategory } from "@/lib/types";
 
 const CATEGORIES: Category[] = ["Food", "Drinks", "Other"];
+const RECEIPT_CATEGORIES: ReceiptCategory[] = ["Dining", "Trips", "Roommates/Home", "Transportation", "Other"];
 
 function money(n: number) {
   return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -50,6 +51,7 @@ interface DraftItem {
   category: Category;
   personIds: string[];
   personUnits: Record<string, number>;
+  splitType: "even" | "shares" | "exact" | "percent";
 }
 
 type Phase = "capture" | "basics" | "participants" | "items" | "review";
@@ -68,6 +70,8 @@ export default function AddReceiptPage() {
   const [tip, setTip] = useState("");
   const [discount, setDiscount] = useState("");
   const [total, setTotal] = useState("");
+  const [selectedTipPct, setSelectedTipPct] = useState<number | null>(null);
+  const [receiptCategory, setReceiptCategory] = useState<ReceiptCategory | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [items, setItems] = useState<DraftItem[]>([]);
@@ -130,6 +134,7 @@ export default function AddReceiptPage() {
               category: (["Food", "Drinks", "Other"].includes(it.category) ? it.category : "Food") as Category,
               personIds: [],
               personUnits: {},
+              splitType: "even" as const,
             }))
           );
         }
@@ -143,7 +148,7 @@ export default function AddReceiptPage() {
   }
 
   function addItem() {
-    setItems([...items, { id: crypto.randomUUID(), name: "", price: "", quantity: 1, category: "Food", personIds: [], personUnits: {} }]);
+    setItems([...items, { id: crypto.randomUUID(), name: "", price: "", quantity: 1, category: "Food", personIds: [], personUnits: {}, splitType: "even" }]);
   }
   function updateItem(id: string, patch: Partial<DraftItem>) {
     setItems(items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
@@ -163,11 +168,27 @@ export default function AddReceiptPage() {
   function setItemPeople(itemId: string, ids: string[]) {
     setItems(items.map((it) => (it.id === itemId ? { ...it, personIds: ids } : it)));
   }
-  function setUnits(itemId: string, personId: string, units: number) {
+  function setSplitType(itemId: string, type: DraftItem["splitType"]) {
     setItems(
-      items.map((it) =>
-        it.id === itemId ? { ...it, personUnits: { ...it.personUnits, [personId]: Math.max(1, units) } } : it
-      )
+      items.map((it) => {
+        if (it.id !== itemId) return it;
+        const count = it.personIds.length || 1;
+        let personUnits: Record<string, number> = {};
+        if (type === "shares") personUnits = Object.fromEntries(it.personIds.map((pid) => [pid, 1]));
+        else if (type === "exact") {
+          const each = Math.round(((Number(it.price) || 0) / count) * 100) / 100;
+          personUnits = Object.fromEntries(it.personIds.map((pid) => [pid, each]));
+        } else if (type === "percent") {
+          const each = Math.round((100 / count) * 100) / 100;
+          personUnits = Object.fromEntries(it.personIds.map((pid) => [pid, each]));
+        }
+        return { ...it, splitType: type, personUnits };
+      })
+    );
+  }
+  function setWeight(itemId: string, personId: string, value: number) {
+    setItems(
+      items.map((it) => (it.id === itemId ? { ...it, personUnits: { ...it.personUnits, [personId]: Math.max(0, value) } } : it))
     );
   }
   function assignCategoryToEveryone(category: Category) {
@@ -200,6 +221,7 @@ export default function AddReceiptPage() {
             category: "Other" as Category,
             personIds: evenParticipants,
             personUnits: {} as Record<string, number>,
+            splitType: "even" as const,
           },
         ]
       : items.filter((it) => it.name.trim() && Number(it.price) > 0).map((it) => ({ ...it, price: Number(it.price) }));
@@ -246,6 +268,7 @@ export default function AddReceiptPage() {
         total: draftReceipt.total,
         tax_tip_method: taxTipMethod,
         split_mode: splitMode,
+        category: receiptCategory,
       })
       .select()
       .single();
@@ -376,7 +399,7 @@ export default function AddReceiptPage() {
             {[
               ["Subtotal", subtotal, setSubtotal],
               ["Tax", tax, setTax],
-              ["Tip", tip, setTip],
+              ["Tip", tip, (v: string) => { setTip(v); setSelectedTipPct(null); }],
               ["Discount", discount, setDiscount],
             ].map(([label, val, setter]: any) => (
               <div key={label}>
@@ -397,10 +420,11 @@ export default function AddReceiptPage() {
                     onClick={() => {
                       const calcTip = Math.round(((Number(subtotal) + Number(tax || 0)) * pct) / 100 * 100) / 100;
                       setTip(String(calcTip));
+                      setSelectedTipPct(pct);
                       const newTotal = Number(subtotal) + Number(tax || 0) + calcTip - Number(discount || 0);
                       setTotal(String(Math.round(newTotal * 100) / 100));
                     }}
-                    className="flex-1 px-2 py-2 rounded-lg text-[13px] font-medium border bg-white text-[#5B5748] border-line"
+                    className={`flex-1 px-2 py-2 rounded-lg text-[13px] font-medium border ${selectedTipPct === pct ? "bg-accent text-white border-accent" : "bg-white text-[#5B5748] border-line"}`}
                   >
                     {pct}%
                   </button>
@@ -424,6 +448,19 @@ export default function AddReceiptPage() {
             </button>
           )}
           {!(Number(subtotal) > 0 || Number(tax) > 0 || Number(tip) > 0) && <div className="mb-6" />}
+
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Category (optional)</p>
+          <div className="flex flex-wrap gap-1.5 mb-6">
+            {RECEIPT_CATEGORIES.map((c) => (
+              <button
+                key={c}
+                onClick={() => setReceiptCategory(receiptCategory === c ? null : c)}
+                className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${receiptCategory === c ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
 
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">How do you want to split it?</p>
           <div className="flex gap-1.5 mb-6">
@@ -522,7 +559,6 @@ export default function AddReceiptPage() {
                   <input type="number" min={1} value={it.quantity}
                     onChange={(e) => updateItem(it.id, { quantity: Math.max(1, Number(e.target.value) || 1) })}
                     className="w-14 rounded-lg border border-line bg-white px-2 py-1 text-[13px] outline-none" />
-                  {it.quantity > 1 && <span className="text-[11px] text-muted">(uneven split? use Portions below)</span>}
                 </div>
                 <div className="flex gap-1.5 mb-2.5">
                   {CATEGORIES.map((c) => (
@@ -551,33 +587,97 @@ export default function AddReceiptPage() {
                     </button>
                   ))}
                 </div>
-                {it.personIds.length > 1 && Number(it.price) > 0 && it.quantity <= 1 && (
-                  <p className="text-[11px] text-muted mt-2">{money(Number(it.price) / it.personIds.length)} each · {it.personIds.length} people</p>
-                )}
-                {it.personIds.length > 1 && it.quantity > 1 && (
+
+                {it.personIds.length > 1 && (
                   <div className="mt-3 pt-3 border-t border-[#EDE9DC]">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">
-                      Portions — not everyone had the same amount?
-                    </p>
-                    <div className="space-y-1.5">
-                      {it.personIds.map((pid) => {
-                        const person = people.find((p) => p.id === pid);
-                        const units = it.personUnits[pid] ?? 1;
-                        const totalUnits = it.personIds.reduce((s, id) => s + (it.personUnits[id] ?? 1), 0);
-                        const share = Number(it.price) * (units / totalUnits);
-                        return (
-                          <div key={pid} className="flex items-center justify-between">
-                            <span className="text-[13px] text-[#3A382F]">{person?.name}</span>
-                            <div className="flex items-center gap-2">
-                              <button onClick={() => setUnits(it.id, pid, units - 1)} className="w-7 h-7 rounded-full bg-[#F0EDE1] text-[#5B5748] text-[15px] font-semibold">−</button>
-                              <span className="w-5 text-center text-[13px] font-medium">{units}</span>
-                              <button onClick={() => setUnits(it.id, pid, units + 1)} className="w-7 h-7 rounded-full bg-[#F0EDE1] text-[#5B5748] text-[15px] font-semibold">+</button>
-                              <span className="w-16 text-right font-mono text-[12px] text-muted">{money(share)}</span>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Split</p>
+                    <div className="flex gap-1.5 mb-3">
+                      {(["even", "shares", "exact", "percent"] as const).map((t) => (
+                        <button key={t} onClick={() => setSplitType(it.id, t)}
+                          className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border ${it.splitType === t ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
+                          {t === "even" ? "Evenly" : t === "shares" ? "Shares" : t === "exact" ? "Exact $" : "%"}
+                        </button>
+                      ))}
                     </div>
+
+                    {it.splitType === "even" && (
+                      <p className="text-[11px] text-muted">{money(Number(it.price) / it.personIds.length)} each · {it.personIds.length} people</p>
+                    )}
+
+                    {it.splitType === "shares" && (
+                      <div className="space-y-1.5">
+                        {it.personIds.map((pid) => {
+                          const person = people.find((p) => p.id === pid);
+                          const units = it.personUnits[pid] ?? 1;
+                          const totalUnits = it.personIds.reduce((s, id) => s + (it.personUnits[id] ?? 1), 0);
+                          const share = Number(it.price) * (units / totalUnits);
+                          return (
+                            <div key={pid} className="flex items-center justify-between">
+                              <span className="text-[13px] text-[#3A382F]">{person?.name}</span>
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => setWeight(it.id, pid, Math.max(0, units - 1))} className="w-7 h-7 rounded-full bg-[#F0EDE1] text-[#5B5748] text-[15px] font-semibold">−</button>
+                                <span className="w-5 text-center text-[13px] font-medium">{units}</span>
+                                <button onClick={() => setWeight(it.id, pid, units + 1)} className="w-7 h-7 rounded-full bg-[#F0EDE1] text-[#5B5748] text-[15px] font-semibold">+</button>
+                                <span className="w-16 text-right font-mono text-[12px] text-muted">{money(share)}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {it.splitType === "exact" && (
+                      <div className="space-y-1.5">
+                        {it.personIds.map((pid) => {
+                          const person = people.find((p) => p.id === pid);
+                          const amt = it.personUnits[pid] ?? 0;
+                          return (
+                            <div key={pid} className="flex items-center justify-between gap-2">
+                              <span className="text-[13px] text-[#3A382F] flex-1">{person?.name}</span>
+                              <input inputMode="decimal" value={amt || ""} onChange={(e) => setWeight(it.id, pid, Number(e.target.value) || 0)}
+                                placeholder="0.00" className="w-20 rounded-lg border border-line bg-white px-2 py-1.5 text-[13px] text-right outline-none" />
+                            </div>
+                          );
+                        })}
+                        {(() => {
+                          const sum = it.personIds.reduce((s, pid) => s + (it.personUnits[pid] ?? 0), 0);
+                          const diff = Math.round((Number(it.price) - sum) * 100) / 100;
+                          return (
+                            <p className={`text-[11px] mt-1 ${Math.abs(diff) < 0.01 ? "text-accent" : "text-owe"}`}>
+                              {Math.abs(diff) < 0.01 ? "Matches item price ✓" : diff > 0 ? `${money(diff)} unassigned` : `${money(Math.abs(diff))} over`}
+                            </p>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {it.splitType === "percent" && (
+                      <div className="space-y-1.5">
+                        {it.personIds.map((pid) => {
+                          const person = people.find((p) => p.id === pid);
+                          const pct = it.personUnits[pid] ?? 0;
+                          return (
+                            <div key={pid} className="flex items-center justify-between gap-2">
+                              <span className="text-[13px] text-[#3A382F] flex-1">{person?.name}</span>
+                              <div className="flex items-center gap-1">
+                                <input inputMode="decimal" value={pct || ""} onChange={(e) => setWeight(it.id, pid, Number(e.target.value) || 0)}
+                                  placeholder="0" className="w-14 rounded-lg border border-line bg-white px-2 py-1.5 text-[13px] text-right outline-none" />
+                                <span className="text-[12px] text-muted">%</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(() => {
+                          const sum = it.personIds.reduce((s, pid) => s + (it.personUnits[pid] ?? 0), 0);
+                          const diff = Math.round((100 - sum) * 100) / 100;
+                          return (
+                            <p className={`text-[11px] mt-1 ${Math.abs(diff) < 0.01 ? "text-accent" : "text-owe"}`}>
+                              {Math.abs(diff) < 0.01 ? "Totals 100% ✓" : diff > 0 ? `${diff}% unassigned` : `${Math.abs(diff)}% over`}
+                            </p>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

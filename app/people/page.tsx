@@ -29,6 +29,15 @@ export default async function PeoplePage() {
         <AddPersonForm />
       </div>
 
+      {people.length > 0 && !people.some((p) => p.is_self) && (
+        <div className="px-5 pt-4">
+          <div className="rounded-xl bg-[#FBF3E6] border border-[#EEDDB8] px-4 py-3 text-[13px] text-[#7A5E24]">
+            <p className="font-semibold mb-1">Which one is you?</p>
+            <p>Tap the <span className="inline-block px-1.5 py-0.5 rounded bg-white border border-[#EEDDB8] text-[11px] font-semibold align-middle mx-0.5">This is me</span> button next to your name below so your own share doesn't show up as money you owe yourself.</p>
+          </div>
+        </div>
+      )}
+
       <div className="px-5 pt-4 space-y-2">
         {balances.length === 0 && <p className="text-[13px] text-muted py-3">No people yet.</p>}
         {balances.map(({ person, totalRemaining }) => (
