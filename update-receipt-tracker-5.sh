@@ -1,3 +1,116 @@
+#!/bin/bash
+set -e
+echo "Applying: Dashboard (charts) as the new Home tab..."
+
+mkdir -p $(dirname 'package.json')
+cat > 'package.json' << 'FILEEOF'
+{
+  "name": "receipt-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
+    "lucide-react": "^0.383.0",
+    "next": "14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.2",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.5.2"
+  }
+}
+FILEEOF
+
+mkdir -p $(dirname 'components/DashboardCharts.tsx')
+cat > 'components/DashboardCharts.tsx' << 'FILEEOF'
+"use client";
+
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid } from "recharts";
+
+function money(n: number) {
+  return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+const PIE_COLORS = ["#1F7A5C", "#C1443A", "#D4A24C", "#5B7DB1", "#8A6BAF", "#A29C8B"];
+
+export function OwedBarChart({ data }: { data: { name: string; amount: number }[] }) {
+  if (data.length === 0) {
+    return <p className="text-[13px] text-muted py-6 text-center">Everyone's settled up — nothing outstanding.</p>;
+  }
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(140, data.length * 44)}>
+      <BarChart data={data} layout="vertical" margin={{ top: 0, right: 24, left: 0, bottom: 0 }}>
+        <XAxis type="number" hide />
+        <YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 12, fill: "#5B5748" }} axisLine={false} tickLine={false} />
+        <Tooltip formatter={(v: number) => money(v)} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #E7E3D8" }} />
+        <Bar dataKey="amount" fill="#C1443A" radius={[0, 6, 6, 0]} barSize={22} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function CategoryPieChart({ data }: { data: { name: string; value: number }[] }) {
+  if (data.length === 0) {
+    return <p className="text-[13px] text-muted py-6 text-center">No receipts yet.</p>;
+  }
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={200}>
+        <PieChart>
+          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2}>
+            {data.map((_, i) => (
+              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip formatter={(v: number) => money(v)} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #E7E3D8" }} />
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 justify-center mt-2">
+        {data.map((d, i) => (
+          <div key={d.name} className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+            <span className="text-[11px] text-muted">{d.name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function MonthlyTrendChart({ data }: { data: { month: string; total: number }[] }) {
+  if (data.length === 0) {
+    return <p className="text-[13px] text-muted py-6 text-center">No receipts yet.</p>;
+  }
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#EDE9DC" vertical={false} />
+        <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#8A8578" }} axisLine={false} tickLine={false} />
+        <YAxis hide />
+        <Tooltip formatter={(v: number) => money(v)} contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #E7E3D8" }} />
+        <Bar dataKey="total" fill="#1F7A5C" radius={[6, 6, 0, 0]} barSize={22} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+FILEEOF
+
+mkdir -p $(dirname 'app/page.tsx')
+cat > 'app/page.tsx' << 'FILEEOF'
 import Link from "next/link";
 import { Receipt as ReceiptIcon, ChevronRight } from "lucide-react";
 import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
@@ -143,3 +256,8 @@ export default async function HomePage() {
     </div>
   );
 }
+FILEEOF
+
+echo "Files updated. Installing new dependency (recharts)..."
+npm install
+echo "Done. Now run: git add . && git commit -m \"Add dashboard with charts as new Home tab\" && git push"
