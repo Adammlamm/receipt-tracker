@@ -60,10 +60,14 @@ export async function loadReceipts(): Promise<Receipt[]> {
     ...r,
     items: (items ?? [])
       .filter((i) => i.receipt_id === r.id)
-      .map((i) => ({
-        ...i,
-        personIds: (splits ?? []).filter((s) => s.item_id === i.id).map((s) => s.person_id),
-      })),
+      .map((i) => {
+        const itemSplits = (splits ?? []).filter((s) => s.item_id === i.id);
+        return {
+          ...i,
+          personIds: itemSplits.map((s) => s.person_id),
+          personUnits: Object.fromEntries(itemSplits.map((s) => [s.person_id, s.units ?? 1])),
+        };
+      }),
   }));
 }
 
@@ -80,10 +84,14 @@ export async function loadReceipt(id: string): Promise<Receipt | null> {
 
   return {
     ...receipt,
-    items: (items ?? []).map((i) => ({
-      ...i,
-      personIds: (splits ?? []).filter((s) => s.item_id === i.id).map((s) => s.person_id),
-    })),
+    items: (items ?? []).map((i) => {
+      const itemSplits = (splits ?? []).filter((s) => s.item_id === i.id);
+      return {
+        ...i,
+        personIds: itemSplits.map((s) => s.person_id),
+        personUnits: Object.fromEntries(itemSplits.map((s) => [s.person_id, s.units ?? 1])),
+      };
+    }),
   };
 }
 

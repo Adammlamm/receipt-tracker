@@ -1,3 +1,294 @@
+#!/bin/bash
+set -e
+echo "Applying tip calculator + portion-split updates..."
+
+cat > 'lib/types.ts' << 'FILEEOF'
+export type Category = "Food" | "Drinks" | "Other";
+export type TaxTipMethod = "proportional" | "equal";
+export type PaymentMethod = "Venmo" | "Zelle" | "Apple Cash" | "Cash" | "PayPal" | "Other";
+
+export interface Person {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface ReceiptItem {
+  id: string;
+  receipt_id: string;
+  name: string;
+  price: number;
+  quantity: number;
+  category: Category;
+  personIds: string[]; // hydrated from item_splits
+  personUnits?: Record<string, number>; // portion weight per person, defaults to 1 each
+}
+
+export interface Group {
+  id: string;
+  user_id: string;
+  name: string;
+  memberIds: string[];
+}
+
+export interface Receipt {
+  id: string;
+  user_id: string;
+  merchant: string;
+  date: string; // ISO date
+  subtotal: number;
+  tax: number;
+  tip: number;
+  discount: number;
+  total: number;
+  tax_tip_method: TaxTipMethod;
+  split_mode: "itemized" | "even";
+  image_path: string | null;
+  items: ReceiptItem[];
+}
+
+export interface Payment {
+  id: string;
+  user_id: string;
+  person_id: string;
+  receipt_id: string | null;
+  amount: number;
+  payment_date: string;
+  payment_method: PaymentMethod;
+}
+FILEEOF
+
+cat > 'lib/data.ts' << 'FILEEOF'
+import { createClient } from "@/lib/supabase/server";
+import { Person, Receipt, Payment, Group } from "@/lib/types";
+
+export async function loadGroups(): Promise<Group[]> {
+  const supabase = createClient();
+  const { data: groups } = await supabase.from("groups").select("*").order("name");
+  if (!groups || groups.length === 0) return [];
+
+  const { data: members } = await supabase
+    .from("group_members")
+    .select("*")
+    .in("group_id", groups.map((g) => g.id));
+
+  return groups.map((g) => ({
+    ...g,
+    memberIds: (members ?? []).filter((m) => m.group_id === g.id).map((m) => m.person_id),
+  }));
+}
+
+export async function loadPeople(): Promise<Person[]> {
+  const supabase = createClient();
+  const { data } = await supabase.from("people").select("*").order("name");
+  return data ?? [];
+}
+
+export async function loadPayments(): Promise<Payment[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("payments")
+    .select("*")
+    .order("payment_date", { ascending: false });
+  return data ?? [];
+}
+
+/** Fetches all receipts for the signed-in user, each hydrated with items + who split them. */
+export async function loadReceipts(): Promise<Receipt[]> {
+  const supabase = createClient();
+
+  const { data: receipts } = await supabase
+    .from("receipts")
+    .select("*")
+    .order("date", { ascending: false });
+
+  if (!receipts || receipts.length === 0) return [];
+
+  const receiptIds = receipts.map((r) => r.id);
+
+  const { data: items } = await supabase
+    .from("receipt_items")
+    .select("*")
+    .in("receipt_id", receiptIds);
+
+  const itemIds = (items ?? []).map((i) => i.id);
+
+  const { data: splits } = itemIds.length
+    ? await supabase.from("item_splits").select("*").in("item_id", itemIds)
+    : { data: [] };
+
+  return receipts.map((r) => ({
+    ...r,
+    items: (items ?? [])
+      .filter((i) => i.receipt_id === r.id)
+      .map((i) => {
+        const itemSplits = (splits ?? []).filter((s) => s.item_id === i.id);
+        return {
+          ...i,
+          personIds: itemSplits.map((s) => s.person_id),
+          personUnits: Object.fromEntries(itemSplits.map((s) => [s.person_id, s.units ?? 1])),
+        };
+      }),
+  }));
+}
+
+export async function loadReceipt(id: string): Promise<Receipt | null> {
+  const supabase = createClient();
+  const { data: receipt } = await supabase.from("receipts").select("*").eq("id", id).single();
+  if (!receipt) return null;
+
+  const { data: items } = await supabase.from("receipt_items").select("*").eq("receipt_id", id);
+  const itemIds = (items ?? []).map((i) => i.id);
+  const { data: splits } = itemIds.length
+    ? await supabase.from("item_splits").select("*").in("item_id", itemIds)
+    : { data: [] };
+
+  return {
+    ...receipt,
+    items: (items ?? []).map((i) => {
+      const itemSplits = (splits ?? []).filter((s) => s.item_id === i.id);
+      return {
+        ...i,
+        personIds: itemSplits.map((s) => s.person_id),
+        personUnits: Object.fromEntries(itemSplits.map((s) => [s.person_id, s.units ?? 1])),
+      };
+    }),
+  };
+}
+
+/** The "receipts" storage bucket is private, so image URLs must be signed. */
+export async function receiptImageUrl(path: string | null): Promise<string | null> {
+  if (!path) return null;
+  const supabase = createClient();
+  const { data } = await supabase.storage.from("receipts").createSignedUrl(path, 60 * 60);
+  return data?.signedUrl ?? null;
+}
+FILEEOF
+
+cat > 'lib/split.ts' << 'FILEEOF'
+import { Payment, Receipt } from "./types";
+
+export interface PersonShare {
+  food: number;
+  drinks: number;
+  other: number;
+  itemSubtotal: number;
+  taxTip: number;
+  total: number;
+}
+
+/** Per-person breakdown of a single receipt: item costs + their share of tax/tip. */
+export function computeReceiptShares(receipt: Receipt): Record<string, PersonShare> {
+  const shares: Record<string, PersonShare> = {};
+  const ensure = (pid: string) => {
+    if (!shares[pid]) {
+      shares[pid] = { food: 0, drinks: 0, other: 0, itemSubtotal: 0, taxTip: 0, total: 0 };
+    }
+    return shares[pid];
+  };
+
+  let itemsTotal = 0;
+  for (const item of receipt.items ?? []) {
+    const people = item.personIds ?? [];
+    if (people.length === 0) continue;
+    const unitsMap = item.personUnits || {};
+    const totalUnits = people.reduce((sum, pid) => sum + (unitsMap[pid] ?? 1), 0) || people.length;
+    itemsTotal += item.price;
+    for (const pid of people) {
+      const units = unitsMap[pid] ?? 1;
+      const per = item.price * (units / totalUnits);
+      const s = ensure(pid);
+      s.itemSubtotal += per;
+      if (item.category === "Food") s.food += per;
+      else if (item.category === "Drinks") s.drinks += per;
+      else s.other += per;
+    }
+  }
+
+  const taxTip = (Number(receipt.tax) || 0) + (Number(receipt.tip) || 0) - (Number(receipt.discount) || 0);
+  const participantIds = Object.keys(shares);
+
+  if (receipt.tax_tip_method === "equal" && participantIds.length > 0) {
+    const each = taxTip / participantIds.length;
+    participantIds.forEach((pid) => (shares[pid].taxTip = each));
+  } else {
+    participantIds.forEach((pid) => {
+      const portion = itemsTotal > 0 ? shares[pid].itemSubtotal / itemsTotal : 0;
+      shares[pid].taxTip = portion * taxTip;
+    });
+  }
+
+  participantIds.forEach((pid) => {
+    shares[pid].total = shares[pid].itemSubtotal + shares[pid].taxTip;
+  });
+
+  return shares;
+}
+
+export interface PersonAllocation {
+  personReceipts: { receipt: Receipt; owed: number }[];
+  remainingMap: Record<string, number>;
+  paidMap: Record<string, number>;
+  totalOwed: number;
+  totalPaid: number;
+  totalRemaining: number;
+}
+
+/**
+ * Allocates a person's payments (some linked to a specific receipt, some general)
+ * across their receipts, oldest first, to work out what's still outstanding.
+ */
+export function allocatePersonPayments(
+  personId: string,
+  receipts: Receipt[],
+  payments: Payment[]
+): PersonAllocation {
+  const personReceipts = receipts
+    .map((r) => {
+      const shares = computeReceiptShares(r);
+      const owed = shares[personId]?.total ?? 0;
+      return owed > 0 ? { receipt: r, owed } : null;
+    })
+    .filter((x): x is { receipt: Receipt; owed: number } => x !== null)
+    .sort((a, b) => (a.receipt.date < b.receipt.date ? -1 : 1));
+
+  const remainingMap: Record<string, number> = {};
+  personReceipts.forEach(({ receipt, owed }) => (remainingMap[receipt.id] = owed));
+
+  const personPayments = payments.filter((p) => p.person_id === personId);
+
+  let generalPool = 0;
+  personPayments.forEach((p) => {
+    if (p.receipt_id && remainingMap[p.receipt_id] !== undefined) {
+      remainingMap[p.receipt_id] = Math.max(0, remainingMap[p.receipt_id] - p.amount);
+    } else {
+      generalPool += p.amount;
+    }
+  });
+
+  for (const { receipt } of personReceipts) {
+    if (generalPool <= 0) break;
+    const bal = remainingMap[receipt.id];
+    const take = Math.min(bal, generalPool);
+    remainingMap[receipt.id] = bal - take;
+    generalPool -= take;
+  }
+
+  const paidMap: Record<string, number> = {};
+  personReceipts.forEach(({ receipt, owed }) => {
+    paidMap[receipt.id] = owed - remainingMap[receipt.id];
+  });
+
+  const totalOwed = personReceipts.reduce((s, r) => s + r.owed, 0);
+  const totalPaid = personPayments.reduce((s, p) => s + p.amount, 0);
+  const totalRemaining = personReceipts.reduce((s, r) => s + remainingMap[r.receipt.id], 0);
+
+  return { personReceipts, remainingMap, paidMap, totalOwed, totalPaid, totalRemaining };
+}
+FILEEOF
+
+cat > 'app/receipts/new/page.tsx' << 'FILEEOF'
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -666,3 +957,7 @@ export default function AddReceiptPage() {
     </div>
   );
 }
+FILEEOF
+
+echo "All files updated."
+echo "Now run: git add . && git commit -m \"Add tip calculator and portion-based item splitting\" && git push"

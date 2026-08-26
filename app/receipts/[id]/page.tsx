@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Pencil } from "lucide-react";
 import { loadPeople, loadReceipt, receiptImageUrl } from "@/lib/data";
 import { computeReceiptShares } from "@/lib/split";
 import DeleteReceiptButton from "./DeleteReceiptButton";
@@ -23,6 +24,9 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
       <div className="h-14 flex items-center px-5 border-b border-line">
         <Link href="/receipts" className="text-[13px] text-muted">Back</Link>
         <h1 className="flex-1 text-center font-semibold text-[15px] text-ink truncate px-2">{receipt.merchant}</h1>
+        <Link href={`/receipts/${receipt.id}/edit`} className="p-2 -mr-1 rounded-full active:bg-[#F5F3EC]">
+          <Pencil size={16} className="text-muted" />
+        </Link>
         <DeleteReceiptButton receiptId={receipt.id} imagePath={receipt.image_path} />
       </div>
 

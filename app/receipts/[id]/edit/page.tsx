@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Camera, Plus, Trash2, X, Sparkles, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import { useRouter, useParams } from "next/navigation";
+import { Plus, Trash2, X, CheckCircle2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { computeReceiptShares } from "@/lib/split";
 import { Category, Person, Group, TaxTipMethod } from "@/lib/types";
@@ -11,35 +11,6 @@ const CATEGORIES: Category[] = ["Food", "Drinks", "Other"];
 
 function money(n: number) {
   return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
-}
-
-function compressImage(file: File, maxW = 1200, quality = 0.78): Promise<{ blob: Blob; dataUrl: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("read failed"));
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxW / img.width);
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d")!;
-        ctx.drawImage(img, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL("image/jpeg", quality);
-        canvas.toBlob(
-          (blob) => (blob ? resolve({ blob, dataUrl }) : reject(new Error("toBlob failed"))),
-          "image/jpeg",
-          quality
-        );
-      };
-      img.onerror = () => reject(new Error("decode failed"));
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 interface DraftItem {
@@ -52,13 +23,16 @@ interface DraftItem {
   personUnits: Record<string, number>;
 }
 
-type Phase = "capture" | "basics" | "participants" | "items" | "review";
+type Phase = "basics" | "participants" | "items" | "review";
 
-export default function AddReceiptPage() {
+export default function EditReceiptPage() {
   const router = useRouter();
+  const params = useParams();
+  const receiptId = params.id as string;
   const supabase = createClient();
 
-  const [phase, setPhase] = useState<Phase>("capture");
+  const [loading, setLoading] = useState(true);
+  const [phase, setPhase] = useState<Phase>("basics");
   const [people, setPeople] = useState<Person[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [merchant, setMerchant] = useState("");
@@ -68,79 +42,71 @@ export default function AddReceiptPage() {
   const [tip, setTip] = useState("");
   const [discount, setDiscount] = useState("");
   const [total, setTotal] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [items, setItems] = useState<DraftItem[]>([]);
   const [taxTipMethod, setTaxTipMethod] = useState<TaxTipMethod>("proportional");
   const [splitMode, setSplitMode] = useState<"itemized" | "even">("itemized");
   const [evenParticipants, setEvenParticipants] = useState<string[]>([]);
   const [newPersonName, setNewPersonName] = useState("");
   const [saving, setSaving] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    supabase.from("people").select("*").order("name").then(({ data }) => setPeople(data ?? []));
     (async () => {
+      const { data: p } = await supabase.from("people").select("*").order("name");
+      setPeople(p ?? []);
       const { data: g } = await supabase.from("groups").select("*").order("name");
       const { data: m } = await supabase.from("group_members").select("*");
       setGroups(
         (g ?? []).map((grp) => ({ ...grp, memberIds: (m ?? []).filter((x) => x.group_id === grp.id).map((x) => x.person_id) }))
       );
+
+      const { data: receipt } = await supabase.from("receipts").select("*").eq("id", receiptId).single();
+      if (!receipt) {
+        setLoading(false);
+        return;
+      }
+      setMerchant(receipt.merchant || "");
+      setDate(receipt.date || new Date().toISOString().slice(0, 10));
+      setSubtotal(String(receipt.subtotal ?? ""));
+      setTax(String(receipt.tax ?? ""));
+      setTip(String(receipt.tip ?? ""));
+      setDiscount(String(receipt.discount ?? ""));
+      setTotal(String(receipt.total ?? ""));
+      setTaxTipMethod(receipt.tax_tip_method || "proportional");
+      setSplitMode(receipt.split_mode || "itemized");
+
+      const { data: dbItems } = await supabase.from("receipt_items").select("*").eq("receipt_id", receiptId);
+      const itemIds = (dbItems ?? []).map((i) => i.id);
+      const { data: dbSplits } = itemIds.length
+        ? await supabase.from("item_splits").select("*").in("item_id", itemIds)
+        : { data: [] };
+
+      if (receipt.split_mode === "even") {
+        const evenItem = (dbItems ?? [])[0];
+        if (evenItem) {
+          const splitsForItem = (dbSplits ?? []).filter((s) => s.item_id === evenItem.id);
+          setEvenParticipants(splitsForItem.map((s) => s.person_id));
+        }
+      } else {
+        setItems(
+          (dbItems ?? []).map((i) => {
+            const splitsForItem = (dbSplits ?? []).filter((s) => s.item_id === i.id);
+            return {
+              id: i.id,
+              name: i.name,
+              price: String(i.price),
+              quantity: i.quantity || 1,
+              category: i.category,
+              personIds: splitsForItem.map((s) => s.person_id),
+              personUnits: Object.fromEntries(splitsForItem.map((s) => [s.person_id, s.units ?? 1])),
+            };
+          })
+        );
+      }
+      setLoading(false);
     })();
-  }, []);
+  }, [receiptId]);
 
   const itemsSum = items.reduce((s, it) => s + (Number(it.price) || 0), 0);
-
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImageFile(file);
-    setScanError(null);
-
-    try {
-      const { dataUrl } = await compressImage(file);
-      setImagePreview(dataUrl);
-      setScanning(true);
-      const base64 = dataUrl.split(",")[1];
-      const res = await fetch("/api/scan-receipt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: base64, mediaType: "image/jpeg" }),
-      });
-      const parsed = await res.json();
-      if (!res.ok) {
-        setScanError(parsed.error || "Couldn't read this receipt automatically — enter it manually below.");
-      } else {
-        setMerchant(parsed.merchant || "");
-        if (parsed.date) setDate(parsed.date);
-        if (parsed.subtotal != null) setSubtotal(String(parsed.subtotal));
-        if (parsed.tax != null) setTax(String(parsed.tax));
-        if (parsed.tip != null) setTip(String(parsed.tip));
-        if (parsed.discount != null) setDiscount(String(parsed.discount));
-        if (parsed.total != null) setTotal(String(parsed.total));
-        if (Array.isArray(parsed.items)) {
-          setItems(
-            parsed.items.map((it: any) => ({
-              id: crypto.randomUUID(),
-              name: it.quantity && it.quantity > 1 ? `${it.quantity} × ${it.name}` : it.name,
-              price: String((Number(it.unit_price) || 0) * (Number(it.quantity) || 1)),
-              quantity: Number(it.quantity) || 1,
-              category: (["Food", "Drinks", "Other"].includes(it.category) ? it.category : "Food") as Category,
-              personIds: [],
-              personUnits: {},
-            }))
-          );
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      setScanError("Couldn't read this receipt automatically — enter it manually below.");
-    } finally {
-      setScanning(false);
-    }
-  }
 
   function addItem() {
     setItems([...items, { id: crypto.randomUUID(), name: "", price: "", quantity: 1, category: "Food", personIds: [], personUnits: {} }]);
@@ -233,10 +199,9 @@ export default function AddReceiptPage() {
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: receipt, error } = await supabase
+    const { error } = await supabase
       .from("receipts")
-      .insert({
-        user_id: user.id,
+      .update({
         merchant: draftReceipt.merchant,
         date: draftReceipt.date,
         subtotal: draftReceipt.subtotal,
@@ -247,29 +212,20 @@ export default function AddReceiptPage() {
         tax_tip_method: taxTipMethod,
         split_mode: splitMode,
       })
-      .select()
-      .single();
+      .eq("id", receiptId);
 
-    if (error || !receipt) {
+    if (error) {
       setSaving(false);
       return;
     }
 
-    if (imageFile) {
-      try {
-        const { blob } = await compressImage(imageFile);
-        const path = `${user.id}/${receipt.id}.jpg`;
-        await supabase.storage.from("receipts").upload(path, blob, { contentType: "image/jpeg" });
-        await supabase.from("receipts").update({ image_path: path }).eq("id", receipt.id);
-      } catch (e) {
-        console.error("image upload failed", e);
-      }
-    }
+    // Replace items + splits: delete existing (cascades to item_splits), then reinsert current state
+    await supabase.from("receipt_items").delete().eq("receipt_id", receiptId);
 
     for (const item of validItems) {
       const { data: savedItem } = await supabase
         .from("receipt_items")
-        .insert({ receipt_id: receipt.id, name: item.name, price: Number(item.price), category: item.category, quantity: item.quantity || 1 })
+        .insert({ receipt_id: receiptId, name: item.name, price: Number(item.price), category: item.category, quantity: item.quantity || 1 })
         .select()
         .single();
       if (savedItem && item.personIds.length) {
@@ -283,84 +239,43 @@ export default function AddReceiptPage() {
       }
     }
 
-    router.push(`/receipts/${receipt.id}`);
+    router.push(`/receipts/${receiptId}`);
     router.refresh();
   }
 
   function backFrom(p: Phase) {
-    if (p === "basics") setPhase("capture");
+    if (p === "basics") router.push(`/receipts/${receiptId}`);
     else if (p === "participants") setPhase("basics");
     else if (p === "items") setPhase("basics");
     else if (p === "review") setPhase(splitMode === "even" ? "participants" : "items");
   }
 
   const titles: Record<Phase, string> = {
-    capture: "Scan Receipt",
-    basics: "Receipt Details",
+    basics: "Edit Receipt",
     participants: "Who's In?",
     items: "Items",
     review: "Review & Split",
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-[13px] text-muted">Loading receipt…</p>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="h-14 flex items-center px-5 border-b border-line">
-        <button onClick={() => (phase === "capture" ? router.push("/") : backFrom(phase))} className="text-[13px] text-muted">
+        <button onClick={() => backFrom(phase)} className="text-[13px] text-muted">
           Back
         </button>
         <h1 className="flex-1 text-center font-semibold text-[15px] text-ink">{titles[phase]}</h1>
-        <button onClick={() => router.push("/")} className="p-1">
+        <button onClick={() => router.push(`/receipts/${receiptId}`)} className="p-1">
           <X size={18} className="text-muted" />
         </button>
       </div>
-
-      {phase === "capture" && (
-        <div className="px-5 pt-4">
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={scanning}
-            className="w-full rounded-2xl border-2 border-dashed border-line bg-white flex flex-col items-center justify-center py-10 mb-4"
-          >
-            {imagePreview ? (
-              <img src={imagePreview} alt="Receipt" className="max-h-56 rounded-lg object-contain" />
-            ) : (
-              <>
-                <Camera size={28} className="text-accent mb-2" />
-                <span className="text-[14px] font-medium text-ink">Take or upload a photo</span>
-                <span className="text-[11px] text-muted mt-0.5">We'll read it automatically</span>
-              </>
-            )}
-          </button>
-
-          {scanning && (
-            <div className="flex items-center justify-center gap-2 text-[13px] text-accent mb-4">
-              <Loader2 size={16} className="animate-spin" />
-              Reading your receipt…
-            </div>
-          )}
-
-          {scanError && (
-            <div className="rounded-xl bg-[#FBF3E6] border border-[#EEDDB8] px-4 py-3 text-[13px] text-[#7A5E24] mb-4">
-              {scanError}
-            </div>
-          )}
-
-          {!scanning && (merchant || items.length > 0) && (
-            <div className="rounded-xl bg-[#EFF7F3] border border-[#CFE8DC] px-4 py-3 text-[13px] text-[#1F7A5C] mb-4 flex items-center gap-2">
-              <Sparkles size={15} /> Scanned — review the details on the next screen.
-            </div>
-          )}
-
-          <button
-            onClick={() => setPhase("basics")}
-            disabled={scanning}
-            className="w-full rounded-xl bg-accent text-white font-semibold py-3.5 mb-3 disabled:opacity-40"
-          >
-            {merchant || items.length > 0 ? "Continue" : "Enter manually instead"}
-          </button>
-        </div>
-      )}
 
       {phase === "basics" && (
         <div className="px-5 pt-4">
@@ -659,7 +574,7 @@ export default function AddReceiptPage() {
           </div>
 
           <button onClick={save} disabled={saving} className="w-full rounded-xl bg-accent text-white font-semibold py-3.5 mb-6 disabled:opacity-40">
-            {saving ? "Saving…" : "Save receipt"}
+            {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
       )}

@@ -6,6 +6,7 @@ export interface Person {
   id: string;
   user_id: string;
   name: string;
+  is_self: boolean;
   created_at: string;
 }
 
@@ -14,8 +15,10 @@ export interface ReceiptItem {
   receipt_id: string;
   name: string;
   price: number;
+  quantity: number;
   category: Category;
   personIds: string[]; // hydrated from item_splits
+  personUnits?: Record<string, number>; // portion weight per person, defaults to 1 each
 }
 
 export interface Group {

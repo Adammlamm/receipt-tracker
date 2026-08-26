@@ -14,7 +14,7 @@ function fmtDate(iso: string) {
 export default async function HomePage() {
   const [people, receipts, payments] = await Promise.all([loadPeople(), loadReceipts(), loadPayments()]);
 
-  const balances = people.map((p) => allocatePersonPayments(p.id, receipts, payments));
+  const balances = people.filter((p) => !p.is_self).map((p) => allocatePersonPayments(p.id, receipts, payments));
   const totalOutstanding = balances.reduce((s, b) => s + b.totalRemaining, 0);
   const peopleOwing = balances.filter((b) => b.totalRemaining > 0.005).length;
 

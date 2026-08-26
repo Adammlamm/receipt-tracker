@@ -21,7 +21,9 @@ export default async function PersonDetailPage({ params }: { params: { id: strin
   return (
     <div>
       <div className="h-14 flex items-center px-5 border-b border-line">
-        <h1 className="font-semibold text-[15px] text-ink flex-1">{person.name}</h1>
+        <Link href="/people" className="text-[13px] text-muted">Back</Link>
+        <h1 className="flex-1 text-center font-semibold text-[15px] text-ink truncate px-2">{person.name}</h1>
+        <div className="w-9" />
       </div>
 
       <div className="px-5 pt-5">

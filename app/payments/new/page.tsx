@@ -42,7 +42,7 @@ function RecordPaymentForm() {
       const { data: r } = await supabase.from("receipts").select("*");
       const { data: items } = await supabase.from("receipt_items").select("*");
       const { data: splits } = await supabase.from("item_splits").select("*");
-      setPeople(p ?? []);
+      setPeople((p ?? []).filter((person: any) => !person.is_self));
       setPayments(pay ?? []);
       setReceipts(
         (r ?? []).map((rec: any) => ({
@@ -88,7 +88,8 @@ function RecordPaymentForm() {
   return (
     <div className="px-5 pt-4">
       <div className="h-14 -mx-5 px-5 flex items-center border-b border-line mb-4">
-        <h1 className="font-semibold text-[15px] text-ink">Record Payment</h1>
+        <button onClick={() => router.back()} className="text-[13px] text-muted">Back</button>
+        <h1 className="flex-1 text-center font-semibold text-[15px] text-ink pr-8">Record Payment</h1>
       </div>
 
       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Person</p>
