@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X, Pencil, Trash2 } from "lucide-react";
+import { Plus, X, Pencil, Trash2, Users2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Person, Group } from "@/lib/types";
+import EmptyState from "@/components/EmptyState";
 
 export default function GroupsManager({ people, initialGroups }: { people: Person[]; initialGroups: Group[] }) {
   const [groups, setGroups] = useState(initialGroups);
@@ -142,7 +143,9 @@ export default function GroupsManager({ people, initialGroups }: { people: Perso
             </button>
           </div>
         ))}
-        {groups.length === 0 && !editorOpen && <p className="text-[13px] text-muted py-2">No groups yet.</p>}
+        {groups.length === 0 && !editorOpen && (
+          <EmptyState icon={Users2} title="No groups yet" body="Create one for a table, a trip, or your regular crew." />
+        )}
       </div>
     </div>
   );

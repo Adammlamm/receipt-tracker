@@ -319,7 +319,7 @@ export default function EditReceiptPage() {
       </div>
 
       {phase === "basics" && (
-        <div className="px-5 pt-4">
+        <div className="px-5 pt-4 animate-page-in">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Merchant</p>
           <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. King Pocha"
             className="w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[15px] outline-none focus:ring-2 focus:ring-accent/40 mb-4" />
@@ -417,7 +417,7 @@ export default function EditReceiptPage() {
       )}
 
       {phase === "participants" && (
-        <div className="px-5 pt-4">
+        <div className="px-5 pt-4 animate-page-in">
           <div className="bg-white rounded-xl border border-line p-2.5 flex items-center gap-2 mb-4">
             <input value={newPersonName} onChange={(e) => setNewPersonName(e.target.value)} placeholder="Add a person…"
               className="flex-1 text-[14px] outline-none px-1.5" onKeyDown={(e) => e.key === "Enter" && addPerson()} />
@@ -452,7 +452,7 @@ export default function EditReceiptPage() {
       )}
 
       {phase === "items" && (
-        <div className="px-5 pt-4">
+        <div className="px-5 pt-4 animate-page-in">
           <div className="bg-white rounded-xl border border-line p-2.5 flex items-center gap-2 mb-3">
             <input value={newPersonName} onChange={(e) => setNewPersonName(e.target.value)} placeholder="Add a person…"
               className="flex-1 text-[14px] outline-none px-1.5" onKeyDown={(e) => e.key === "Enter" && addPerson()} />
@@ -651,7 +651,7 @@ export default function EditReceiptPage() {
       )}
 
       {phase === "review" && (
-        <div className="px-5 pt-4">
+        <div className="px-5 pt-4 animate-page-in">
           {splitMode === "even" ? (
             <div className="bg-white rounded-xl border border-line p-4 mb-4">
               <div className="flex justify-between text-[14px] font-semibold"><span>Total</span><span className="font-mono">{money(draftReceipt.total)}</span></div>

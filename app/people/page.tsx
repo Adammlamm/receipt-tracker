@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Users2 } from "lucide-react";
+import { Users2, Users } from "lucide-react";
 import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
 import { allocatePersonPayments } from "@/lib/split";
 import BottomNav from "@/components/BottomNav";
 import AddPersonForm from "./AddPersonForm";
 import PersonRow from "./PersonRow";
+import EmptyState from "@/components/EmptyState";
 
 function money(n: number) {
   return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -39,7 +40,9 @@ export default async function PeoplePage() {
       )}
 
       <div className="px-5 pt-4 space-y-2">
-        {balances.length === 0 && <p className="text-[13px] text-muted py-3">No people yet.</p>}
+        {balances.length === 0 && (
+          <EmptyState icon={Users} title="No people yet" body="Add the people you usually split with above." />
+        )}
         {balances.map(({ person, totalRemaining }) => (
           <PersonRow key={person.id} person={person} totalRemaining={totalRemaining} />
         ))}

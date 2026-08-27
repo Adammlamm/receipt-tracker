@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { CreditCard } from "lucide-react";
 import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
 import BottomNav from "@/components/BottomNav";
+import EmptyState from "@/components/EmptyState";
 
 function money(n: number) {
   return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -24,7 +26,9 @@ export default async function PaymentsPage() {
       </div>
 
       <div className="px-5 pt-4 space-y-2">
-        {payments.length === 0 && <p className="text-[13px] text-muted py-3">No payments recorded yet.</p>}
+        {payments.length === 0 && (
+          <EmptyState icon={CreditCard} title="No payments yet" body="Record one once someone pays you back." />
+        )}
         {payments.map((p) => (
           <div key={p.id} className="bg-white rounded-xl border border-line px-4 py-3 flex items-center gap-3">
             <div className="flex-1 min-w-0">

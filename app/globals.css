@@ -9,3 +9,23 @@ html, body {
 .dotted-row {
   border-bottom: 1px dotted #D8D3C4;
 }
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-page-in {
+  animation: page-in 220ms ease-out;
+}
+
+/* Subtle press feedback so taps feel responsive rather than static */
+button:active {
+  transform: scale(0.98);
+}

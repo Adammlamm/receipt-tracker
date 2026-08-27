@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Receipt as ReceiptIcon, ChevronRight } from "lucide-react";
 import { loadReceipts } from "@/lib/data";
 import BottomNav from "@/components/BottomNav";
+import EmptyState from "@/components/EmptyState";
 
 function money(n: number) {
   return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -20,7 +21,9 @@ export default async function ReceiptsPage() {
       </div>
 
       <div className="px-5 pt-4 space-y-2">
-        {receipts.length === 0 && <p className="text-[13px] text-muted py-3">No receipts yet.</p>}
+        {receipts.length === 0 && (
+          <EmptyState icon={ReceiptIcon} title="No receipts yet" body="Tap Add Receipt to get started." />
+        )}
         {receipts.map((r) => (
           <Link key={r.id} href={`/receipts/${r.id}`} className="w-full bg-white rounded-xl border border-line px-4 py-3 flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-[#F0EDE1] flex items-center justify-center shrink-0">
