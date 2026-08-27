@@ -1,3 +1,9 @@
+#!/bin/bash
+set -e
+echo "Applying: Next.js security patch (14.2.5 -> 14.2.35, fixes CVE-2025-29927)..."
+
+mkdir -p $(dirname 'package.json')
+cat > 'package.json' << 'FILEEOF'
 {
   "name": "receipt-tracker",
   "version": "0.1.0",
@@ -30,3 +36,10 @@
     "vitest": "^4.1.11"
   }
 }
+FILEEOF
+
+echo "package.json updated. Installing the new Next.js version..."
+npm install
+echo "Running tests to confirm nothing broke..."
+npm test
+echo "Done. Now run: git add . && git commit -m \"Upgrade Next.js to 14.2.35 (security patch)\" && git push"
