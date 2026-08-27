@@ -23,12 +23,13 @@ export function computeReceiptShares(receipt: Receipt): Record<string, PersonSha
   for (const item of receipt.items ?? []) {
     const people = item.personIds ?? [];
     if (people.length === 0) continue;
+    const effectivePrice = Math.max(0, (Number(item.price) || 0) - (Number(item.discount) || 0));
     const unitsMap = item.personUnits || {};
     const totalUnits = people.reduce((sum, pid) => sum + (unitsMap[pid] ?? 1), 0) || people.length;
-    itemsTotal += item.price;
+    itemsTotal += effectivePrice;
     for (const pid of people) {
       const units = unitsMap[pid] ?? 1;
-      const per = item.price * (units / totalUnits);
+      const per = effectivePrice * (units / totalUnits);
       const s = ensure(pid);
       s.itemSubtotal += per;
       if (item.category === "Food") s.food += per;

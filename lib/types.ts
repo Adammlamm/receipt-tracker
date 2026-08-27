@@ -20,6 +20,7 @@ export interface ReceiptItem {
   name: string;
   price: number;
   quantity: number;
+  discount: number;
   category: Category;
   personIds: string[]; // hydrated from item_splits
   personUnits?: Record<string, number>; // portion weight per person, defaults to 1 each
@@ -46,6 +47,7 @@ export interface Receipt {
   split_mode: "itemized" | "even";
   category: ReceiptCategory | null;
   image_path: string | null;
+  image_mime: string | null;
   items: ReceiptItem[];
 }
 

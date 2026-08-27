@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const SYSTEM_PROMPT = `You read restaurant/store receipts from photos and extract structured data.
+const SYSTEM_PROMPT = `You read restaurant/store receipts from photos or PDFs and extract structured data.
 Return ONLY valid JSON, no prose, no markdown fences, matching exactly this shape:
 
 {
@@ -37,8 +37,13 @@ export async function POST(request: Request) {
 
   const { imageBase64, mediaType } = await request.json();
   if (!imageBase64) {
-    return NextResponse.json({ error: "No image provided." }, { status: 400 });
+    return NextResponse.json({ error: "No file provided." }, { status: 400 });
   }
+
+  const isPdf = mediaType === "application/pdf";
+  const contentBlock = isPdf
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: imageBase64 } }
+    : { type: "image", source: { type: "base64", media_type: mediaType || "image/jpeg", data: imageBase64 } };
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -55,13 +60,7 @@ export async function POST(request: Request) {
         messages: [
           {
             role: "user",
-            content: [
-              {
-                type: "image",
-                source: { type: "base64", media_type: mediaType || "image/jpeg", data: imageBase64 },
-              },
-              { type: "text", text: "Extract this receipt into the JSON shape described." },
-            ],
+            content: [contentBlock, { type: "text", text: "Extract this receipt into the JSON shape described." }],
           },
         ],
       }),

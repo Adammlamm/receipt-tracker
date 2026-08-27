@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Pencil } from "lucide-react";
+import { Pencil, FileText } from "lucide-react";
 import { loadPeople, loadReceipt, receiptImageUrl } from "@/lib/data";
 import { computeReceiptShares } from "@/lib/split";
 import DeleteReceiptButton from "./DeleteReceiptButton";
@@ -31,7 +31,19 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
       </div>
 
       <div className="px-5 pt-4">
-        {imageUrl && <img src={imageUrl} alt="Receipt" className="w-full rounded-xl mb-4 border border-line" />}
+        {imageUrl && receipt.image_mime === "application/pdf" ? (
+          <a
+            href={imageUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full rounded-xl mb-4 border border-line bg-white flex items-center gap-3 px-4 py-3"
+          >
+            <FileText size={20} className="text-accent" />
+            <span className="text-[14px] font-medium text-ink">View original PDF</span>
+          </a>
+        ) : (
+          imageUrl && <img src={imageUrl} alt="Receipt" className="w-full rounded-xl mb-4 border border-line" />
+        )}
         <p className="text-[12px] text-muted mb-4">{fmtDate(receipt.date)}</p>
 
         <div className="bg-white rounded-xl border border-line p-4 mb-5">
@@ -40,9 +52,21 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
             <div key={it.id} className="py-1.5">
               <div className="flex justify-between text-[14px] text-[#3A382F]">
                 <span>{it.name}</span>
-                <span className="font-mono">{money(it.price)}</span>
+                <span className="font-mono">
+                  {it.discount > 0 ? (
+                    <>
+                      <span className="line-through text-[#B4AEA0] mr-1.5">{money(it.price)}</span>
+                      {money(Math.max(0, it.price - it.discount))}
+                    </>
+                  ) : (
+                    money(it.price)
+                  )}
+                </span>
               </div>
-              <p className="text-[11px] text-[#A29C8B]">{it.category} · {it.personIds.map(nameFor).join(", ")}</p>
+              <p className="text-[11px] text-[#A29C8B]">
+                {it.category} · {it.personIds.map(nameFor).join(", ")}
+                {it.discount > 0 && <span className="text-accent"> · −{money(it.discount)} discount</span>}
+              </p>
             </div>
           ))}
           <div className="border-t border-[#EDE9DC] mt-2 pt-2 space-y-1">
