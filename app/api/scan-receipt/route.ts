@@ -40,6 +40,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No file provided." }, { status: 400 });
   }
 
+  // Guard against unexpectedly huge uploads (base64 is ~4/3 the size of the raw file).
+  const approxBytes = (imageBase64.length * 3) / 4;
+  if (approxBytes > 10 * 1024 * 1024) {
+    return NextResponse.json({ error: "That file is too large to scan (max ~8MB). Try a smaller photo or lighter PDF." }, { status: 413 });
+  }
+
   const isPdf = mediaType === "application/pdf";
   const contentBlock = isPdf
     ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: imageBase64 } }

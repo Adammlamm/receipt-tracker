@@ -1,3 +1,260 @@
+#!/bin/bash
+set -e
+echo "Applying: rounding fix, duplicate warning, draft autosave, error pages, file-size cap..."
+
+mkdir -p $(dirname 'lib/split.ts')
+cat > 'lib/split.ts' << 'FILEEOF'
+import { Payment, Receipt } from "./types";
+
+export interface PersonShare {
+  food: number;
+  drinks: number;
+  other: number;
+  itemSubtotal: number;
+  taxTip: number;
+  total: number;
+}
+
+/** Per-person breakdown of a single receipt: item costs + their share of tax/tip. */
+export function computeReceiptShares(receipt: Receipt): Record<string, PersonShare> {
+  const shares: Record<string, PersonShare> = {};
+  const ensure = (pid: string) => {
+    if (!shares[pid]) {
+      shares[pid] = { food: 0, drinks: 0, other: 0, itemSubtotal: 0, taxTip: 0, total: 0 };
+    }
+    return shares[pid];
+  };
+
+  let itemsTotal = 0;
+  for (const item of receipt.items ?? []) {
+    const people = item.personIds ?? [];
+    if (people.length === 0) continue;
+    const effectivePrice = Math.max(0, (Number(item.price) || 0) - (Number(item.discount) || 0));
+    const unitsMap = item.personUnits || {};
+    const totalUnits = people.reduce((sum, pid) => sum + (unitsMap[pid] ?? 1), 0) || people.length;
+    itemsTotal += effectivePrice;
+    for (const pid of people) {
+      const units = unitsMap[pid] ?? 1;
+      const per = effectivePrice * (units / totalUnits);
+      const s = ensure(pid);
+      s.itemSubtotal += per;
+      if (item.category === "Food") s.food += per;
+      else if (item.category === "Drinks") s.drinks += per;
+      else s.other += per;
+    }
+  }
+
+  const taxTip = (Number(receipt.tax) || 0) + (Number(receipt.tip) || 0) - (Number(receipt.discount) || 0);
+  const participantIds = Object.keys(shares);
+
+  if (receipt.tax_tip_method === "equal" && participantIds.length > 0) {
+    const each = taxTip / participantIds.length;
+    participantIds.forEach((pid) => (shares[pid].taxTip = each));
+  } else {
+    participantIds.forEach((pid) => {
+      const portion = itemsTotal > 0 ? shares[pid].itemSubtotal / itemsTotal : 0;
+      shares[pid].taxTip = portion * taxTip;
+    });
+  }
+
+  participantIds.forEach((pid) => {
+    shares[pid].total = shares[pid].itemSubtotal + shares[pid].taxTip;
+  });
+
+  // Penny-exact reconciliation: independently rounding each person's share to
+  // cents can leave the totals off by a cent or two from the true sum. Fix that
+  // using the "largest remainder" method — the fairest way to hand out the
+  // leftover pennies — so the amounts you'd actually collect always add up exactly.
+  if (participantIds.length > 0) {
+    const rawTotal = participantIds.reduce((s, pid) => s + shares[pid].total, 0);
+    const targetCents = Math.round(rawTotal * 100);
+    const roundedCents: Record<string, number> = {};
+    participantIds.forEach((pid) => (roundedCents[pid] = Math.round(shares[pid].total * 100)));
+    let diff = targetCents - participantIds.reduce((s, pid) => s + roundedCents[pid], 0);
+
+    if (diff !== 0) {
+      const order = [...participantIds].sort((a, b) => {
+        const remA = shares[a].total * 100 - Math.floor(shares[a].total * 100);
+        const remB = shares[b].total * 100 - Math.floor(shares[b].total * 100);
+        return diff > 0 ? remB - remA : remA - remB;
+      });
+      let i = 0;
+      while (diff !== 0 && i < order.length * 4) {
+        const pid = order[i % order.length];
+        roundedCents[pid] += diff > 0 ? 1 : -1;
+        diff += diff > 0 ? -1 : 1;
+        i++;
+      }
+    }
+
+    participantIds.forEach((pid) => (shares[pid].total = roundedCents[pid] / 100));
+  }
+
+  return shares;
+}
+
+export interface PersonAllocation {
+  personReceipts: { receipt: Receipt; owed: number }[];
+  remainingMap: Record<string, number>;
+  paidMap: Record<string, number>;
+  totalOwed: number;
+  totalPaid: number;
+  totalRemaining: number;
+}
+
+/**
+ * Allocates a person's payments (some linked to a specific receipt, some general)
+ * across their receipts, oldest first, to work out what's still outstanding.
+ */
+export function allocatePersonPayments(
+  personId: string,
+  receipts: Receipt[],
+  payments: Payment[]
+): PersonAllocation {
+  const personReceipts = receipts
+    .map((r) => {
+      const shares = computeReceiptShares(r);
+      const owed = shares[personId]?.total ?? 0;
+      return owed > 0 ? { receipt: r, owed } : null;
+    })
+    .filter((x): x is { receipt: Receipt; owed: number } => x !== null)
+    .sort((a, b) => (a.receipt.date < b.receipt.date ? -1 : 1));
+
+  const remainingMap: Record<string, number> = {};
+  personReceipts.forEach(({ receipt, owed }) => (remainingMap[receipt.id] = owed));
+
+  const personPayments = payments.filter((p) => p.person_id === personId);
+
+  let generalPool = 0;
+  personPayments.forEach((p) => {
+    if (p.receipt_id && remainingMap[p.receipt_id] !== undefined) {
+      remainingMap[p.receipt_id] = Math.max(0, remainingMap[p.receipt_id] - p.amount);
+    } else {
+      generalPool += p.amount;
+    }
+  });
+
+  for (const { receipt } of personReceipts) {
+    if (generalPool <= 0) break;
+    const bal = remainingMap[receipt.id];
+    const take = Math.min(bal, generalPool);
+    remainingMap[receipt.id] = bal - take;
+    generalPool -= take;
+  }
+
+  const paidMap: Record<string, number> = {};
+  personReceipts.forEach(({ receipt, owed }) => {
+    paidMap[receipt.id] = owed - remainingMap[receipt.id];
+  });
+
+  const totalOwed = personReceipts.reduce((s, r) => s + r.owed, 0);
+  const totalPaid = personPayments.reduce((s, p) => s + p.amount, 0);
+  const totalRemaining = personReceipts.reduce((s, r) => s + remainingMap[r.receipt.id], 0);
+
+  return { personReceipts, remainingMap, paidMap, totalOwed, totalPaid, totalRemaining };
+}
+FILEEOF
+
+mkdir -p $(dirname 'app/api/scan-receipt/route.ts')
+cat > 'app/api/scan-receipt/route.ts' << 'FILEEOF'
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+const SYSTEM_PROMPT = `You read restaurant/store receipts from photos or PDFs and extract structured data.
+Return ONLY valid JSON, no prose, no markdown fences, matching exactly this shape:
+
+{
+  "merchant": string,
+  "date": string | null,       // YYYY-MM-DD if you can read it, else null
+  "items": [
+    { "name": string, "quantity": number, "unit_price": number, "category": "Food" | "Drinks" | "Other" }
+  ],
+  "subtotal": number | null,
+  "tax": number | null,
+  "tip": number | null,
+  "discount": number | null,   // positive number representing amount subtracted, 0 if none
+  "total": number | null
+}
+
+Rules:
+- "unit_price" is the price for ONE unit of that item (if the receipt shows a line total for multiple quantity, divide it).
+- Guess "category" per item: alcohol/beer/wine/cocktails -> "Drinks", soda/coffee/juice/water are also "Drinks", entrees/appetizers/sides -> "Food", anything else (fees, misc) -> "Other".
+- If a value truly isn't visible on the receipt, use null rather than guessing.
+- Do not include currency symbols in numbers.
+- Respond with raw JSON only.`;
+
+export async function POST(request: Request) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "Receipt scanning isn't configured yet (missing ANTHROPIC_API_KEY)." },
+      { status: 500 }
+    );
+  }
+
+  const { imageBase64, mediaType } = await request.json();
+  if (!imageBase64) {
+    return NextResponse.json({ error: "No file provided." }, { status: 400 });
+  }
+
+  // Guard against unexpectedly huge uploads (base64 is ~4/3 the size of the raw file).
+  const approxBytes = (imageBase64.length * 3) / 4;
+  if (approxBytes > 10 * 1024 * 1024) {
+    return NextResponse.json({ error: "That file is too large to scan (max ~8MB). Try a smaller photo or lighter PDF." }, { status: 413 });
+  }
+
+  const isPdf = mediaType === "application/pdf";
+  const contentBlock = isPdf
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: imageBase64 } }
+    : { type: "image", source: { type: "base64", media_type: mediaType || "image/jpeg", data: imageBase64 } };
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: [contentBlock, { type: "text", text: "Extract this receipt into the JSON shape described." }],
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("Anthropic API error:", errText);
+      return NextResponse.json({ error: "Receipt scan failed. Try entering it manually." }, { status: 502 });
+    }
+
+    const data = await res.json();
+    const textBlock = data.content?.find((b: any) => b.type === "text");
+    if (!textBlock) {
+      return NextResponse.json({ error: "Couldn't read a response from the scanner." }, { status: 502 });
+    }
+
+    const cleaned = textBlock.text.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return NextResponse.json(parsed);
+  } catch (err) {
+    console.error("scan-receipt error:", err);
+    return NextResponse.json({ error: "Receipt scan failed. Try entering it manually." }, { status: 500 });
+  }
+}
+FILEEOF
+
+mkdir -p $(dirname 'app/receipts/new/page.tsx')
+cat > 'app/receipts/new/page.tsx' << 'FILEEOF'
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -898,3 +1155,61 @@ export default function AddReceiptPage() {
     </div>
   );
 }
+FILEEOF
+
+mkdir -p $(dirname 'app/error.tsx')
+cat > 'app/error.tsx' << 'FILEEOF'
+"use client";
+
+import { useEffect } from "react";
+import { AlertTriangle } from "lucide-react";
+
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => {
+    console.error(error);
+  }, [error]);
+
+  return (
+    <div className="min-h-screen bg-paper flex items-center justify-center px-6">
+      <div className="text-center max-w-sm">
+        <div className="w-12 h-12 rounded-full bg-[#FBEDEA] flex items-center justify-center mx-auto mb-4">
+          <AlertTriangle size={22} className="text-owe" />
+        </div>
+        <h1 className="text-[17px] font-semibold text-ink mb-1.5">Something went wrong</h1>
+        <p className="text-[13px] text-muted mb-6">
+          That's on us, not your data — nothing was lost. Try again, and if it keeps happening, come back in a bit.
+        </p>
+        <button onClick={() => reset()} className="rounded-xl bg-accent text-white font-semibold py-3 px-6 text-[14px]">
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+FILEEOF
+
+mkdir -p $(dirname 'app/not-found.tsx')
+cat > 'app/not-found.tsx' << 'FILEEOF'
+import Link from "next/link";
+import { Receipt } from "lucide-react";
+
+export default function NotFound() {
+  return (
+    <div className="min-h-screen bg-paper flex items-center justify-center px-6">
+      <div className="text-center max-w-sm">
+        <div className="w-12 h-12 rounded-full bg-[#F0EDE1] flex items-center justify-center mx-auto mb-4">
+          <Receipt size={22} className="text-muted" />
+        </div>
+        <h1 className="text-[17px] font-semibold text-ink mb-1.5">Not found</h1>
+        <p className="text-[13px] text-muted mb-6">This page or receipt doesn't exist — it may have been deleted.</p>
+        <Link href="/" className="inline-block rounded-xl bg-accent text-white font-semibold py-3 px-6 text-[14px]">
+          Back to Home
+        </Link>
+      </div>
+    </div>
+  );
+}
+FILEEOF
+
+echo "All files updated."
+echo "Now run: git add . && git commit -m \"Add rounding fix, duplicate warning, draft autosave, error pages\" && git push"

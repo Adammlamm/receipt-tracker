@@ -55,6 +55,35 @@ export function computeReceiptShares(receipt: Receipt): Record<string, PersonSha
     shares[pid].total = shares[pid].itemSubtotal + shares[pid].taxTip;
   });
 
+  // Penny-exact reconciliation: independently rounding each person's share to
+  // cents can leave the totals off by a cent or two from the true sum. Fix that
+  // using the "largest remainder" method — the fairest way to hand out the
+  // leftover pennies — so the amounts you'd actually collect always add up exactly.
+  if (participantIds.length > 0) {
+    const rawTotal = participantIds.reduce((s, pid) => s + shares[pid].total, 0);
+    const targetCents = Math.round(rawTotal * 100);
+    const roundedCents: Record<string, number> = {};
+    participantIds.forEach((pid) => (roundedCents[pid] = Math.round(shares[pid].total * 100)));
+    let diff = targetCents - participantIds.reduce((s, pid) => s + roundedCents[pid], 0);
+
+    if (diff !== 0) {
+      const order = [...participantIds].sort((a, b) => {
+        const remA = shares[a].total * 100 - Math.floor(shares[a].total * 100);
+        const remB = shares[b].total * 100 - Math.floor(shares[b].total * 100);
+        return diff > 0 ? remB - remA : remA - remB;
+      });
+      let i = 0;
+      while (diff !== 0 && i < order.length * 4) {
+        const pid = order[i % order.length];
+        roundedCents[pid] += diff > 0 ? 1 : -1;
+        diff += diff > 0 ? -1 : 1;
+        i++;
+      }
+    }
+
+    participantIds.forEach((pid) => (shares[pid].total = roundedCents[pid] / 100));
+  }
+
   return shares;
 }
 
