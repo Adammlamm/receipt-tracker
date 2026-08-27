@@ -49,7 +49,7 @@ export default async function PersonDetailPage({ params }: { params: { id: strin
           </>
         )}
 
-        <PersonActions person={person} />
+        <PersonActions person={person} allPeople={people} />
 
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Receipts</p>
         <div className="space-y-2 mb-8">
