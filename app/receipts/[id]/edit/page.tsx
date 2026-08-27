@@ -189,7 +189,9 @@ export default function EditReceiptPage() {
           {
             id: "even-split",
             name: "Whole bill",
-            price: Number(subtotal) || 0,
+            price:
+              Number(total) ||
+              (Number(subtotal) || 0) + (Number(tax) || 0) + (Number(tip) || 0) - (Number(discount) || 0),
             discount: 0,
             quantity: 1,
             category: "Other" as Category,
@@ -650,17 +652,23 @@ export default function EditReceiptPage() {
 
       {phase === "review" && (
         <div className="px-5 pt-4">
-          <div className="bg-white rounded-xl border border-line p-4 mb-4">
-            <div className="flex justify-between text-[13px] mb-1"><span className="text-muted">Receipt total</span><span className="font-mono text-ink">{money(draftReceipt.total)}</span></div>
-            <div className="flex justify-between text-[13px] mb-1"><span className="text-muted">Calculated total</span><span className="font-mono text-ink">{money(calculatedTotal)}</span></div>
-            <div className={`flex justify-between text-[13px] items-center ${Math.abs(totalDifference) < 0.01 ? "text-accent" : "text-owe"}`}>
-              <span>Difference</span>
-              <span className="font-mono flex items-center gap-1">
-                {money(Math.abs(totalDifference))}
-                {Math.abs(totalDifference) < 0.01 ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-              </span>
+          {splitMode === "even" ? (
+            <div className="bg-white rounded-xl border border-line p-4 mb-4">
+              <div className="flex justify-between text-[14px] font-semibold"><span>Total</span><span className="font-mono">{money(draftReceipt.total)}</span></div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-line p-4 mb-4">
+              <div className="flex justify-between text-[13px] mb-1"><span className="text-muted">Receipt total</span><span className="font-mono text-ink">{money(draftReceipt.total)}</span></div>
+              <div className="flex justify-between text-[13px] mb-1"><span className="text-muted">Calculated total</span><span className="font-mono text-ink">{money(calculatedTotal)}</span></div>
+              <div className={`flex justify-between text-[13px] items-center ${Math.abs(totalDifference) < 0.01 ? "text-accent" : "text-owe"}`}>
+                <span>Difference</span>
+                <span className="font-mono flex items-center gap-1">
+                  {money(Math.abs(totalDifference))}
+                  {Math.abs(totalDifference) < 0.01 ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                </span>
+              </div>
+            </div>
+          )}
 
           {splitMode === "itemized" && (
             <div className="flex gap-1.5 mb-5">

@@ -19,41 +19,60 @@ export function computeReceiptShares(receipt: Receipt): Record<string, PersonSha
     return shares[pid];
   };
 
-  let itemsTotal = 0;
-  for (const item of receipt.items ?? []) {
-    const people = item.personIds ?? [];
-    if (people.length === 0) continue;
-    const effectivePrice = Math.max(0, (Number(item.price) || 0) - (Number(item.discount) || 0));
-    const unitsMap = item.personUnits || {};
-    const totalUnits = people.reduce((sum, pid) => sum + (unitsMap[pid] ?? 1), 0) || people.length;
-    itemsTotal += effectivePrice;
-    for (const pid of people) {
-      const units = unitsMap[pid] ?? 1;
-      const per = effectivePrice * (units / totalUnits);
-      const s = ensure(pid);
-      s.itemSubtotal += per;
-      if (item.category === "Food") s.food += per;
-      else if (item.category === "Drinks") s.drinks += per;
-      else s.other += per;
+  if (receipt.split_mode === "even") {
+    // Whole-bill-evenly mode: split the actual total across whoever's in, directly —
+    // no dependency on subtotal/tax/tip being filled in separately, since everyone
+    // pays the same share of everything either way.
+    const item = (receipt.items ?? [])[0];
+    const people = item?.personIds ?? [];
+    if (people.length > 0) {
+      const each = (Number(receipt.total) || 0) / people.length;
+      people.forEach((pid) => {
+        const s = ensure(pid);
+        s.other = each;
+        s.itemSubtotal = each;
+        s.total = each;
+      });
     }
-  }
-
-  const taxTip = (Number(receipt.tax) || 0) + (Number(receipt.tip) || 0) - (Number(receipt.discount) || 0);
-  const participantIds = Object.keys(shares);
-
-  if (receipt.tax_tip_method === "equal" && participantIds.length > 0) {
-    const each = taxTip / participantIds.length;
-    participantIds.forEach((pid) => (shares[pid].taxTip = each));
   } else {
+    let itemsTotal = 0;
+    for (const item of receipt.items ?? []) {
+      const people = item.personIds ?? [];
+      if (people.length === 0) continue;
+      const effectivePrice = Math.max(0, (Number(item.price) || 0) - (Number(item.discount) || 0));
+      const unitsMap = item.personUnits || {};
+      const totalUnits = people.reduce((sum, pid) => sum + (unitsMap[pid] ?? 1), 0) || people.length;
+      itemsTotal += effectivePrice;
+      for (const pid of people) {
+        const units = unitsMap[pid] ?? 1;
+        const per = effectivePrice * (units / totalUnits);
+        const s = ensure(pid);
+        s.itemSubtotal += per;
+        if (item.category === "Food") s.food += per;
+        else if (item.category === "Drinks") s.drinks += per;
+        else s.other += per;
+      }
+    }
+
+    const taxTip = (Number(receipt.tax) || 0) + (Number(receipt.tip) || 0) - (Number(receipt.discount) || 0);
+    const participantIds = Object.keys(shares);
+
+    if (receipt.tax_tip_method === "equal" && participantIds.length > 0) {
+      const each = taxTip / participantIds.length;
+      participantIds.forEach((pid) => (shares[pid].taxTip = each));
+    } else {
+      participantIds.forEach((pid) => {
+        const portion = itemsTotal > 0 ? shares[pid].itemSubtotal / itemsTotal : 0;
+        shares[pid].taxTip = portion * taxTip;
+      });
+    }
+
     participantIds.forEach((pid) => {
-      const portion = itemsTotal > 0 ? shares[pid].itemSubtotal / itemsTotal : 0;
-      shares[pid].taxTip = portion * taxTip;
+      shares[pid].total = shares[pid].itemSubtotal + shares[pid].taxTip;
     });
   }
 
-  participantIds.forEach((pid) => {
-    shares[pid].total = shares[pid].itemSubtotal + shares[pid].taxTip;
-  });
+  const participantIds = Object.keys(shares);
 
   // Penny-exact reconciliation: independently rounding each person's share to
   // cents can leave the totals off by a cent or two from the true sum. Fix that
