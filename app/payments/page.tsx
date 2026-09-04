@@ -3,6 +3,7 @@ import { CreditCard } from "lucide-react";
 import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
 import BottomNav from "@/components/BottomNav";
 import EmptyState from "@/components/EmptyState";
+import ExportButtons from "./ExportButtons";
 
 function money(n: number) {
   return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -23,6 +24,10 @@ export default async function PaymentsPage() {
         <Link href="/payments/new" className="text-accent text-[13px] font-semibold">
           + Add
         </Link>
+      </div>
+
+      <div className="px-5 pt-4">
+        <ExportButtons />
       </div>
 
       <div className="px-5 pt-4 space-y-2">
