@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeReceiptShares, allocatePersonPayments, applyItemCoverage } from "../split";
+import { computeReceiptShares, allocatePersonPayments, applyItemCoverage, resolveAdjustments } from "../split";
 import { buildPaymentLink, supportsPaymentLink, buildReminderSmsLink } from "../paymentLinks";
 import type { Receipt, ReceiptItem, Payment } from "../types";
 
@@ -497,5 +497,83 @@ describe("applyItemCoverage — 'someone is covering someone else' feature", () 
     const shares = computeReceiptShares(r);
     expect(shares.emi).toBeUndefined();
     expect(shares.trung.total).toBeCloseTo(40);
+  });
+});
+
+describe("resolveAdjustments — 'By adjustment' split mode", () => {
+  it("splits evenly as a baseline when no one has an adjustment", () => {
+    const items = resolveAdjustments([
+      { price: 90, personIds: ["a", "b", "c"], personUnits: {}, splitType: "adjustment" },
+    ]);
+    expect(items[0].personUnits).toEqual({ a: 30, b: 30, c: 30 });
+  });
+
+  it("gives someone a flat bump on top of the baseline, and reduces everyone else's baseline to compensate", () => {
+    // $90 for 3 people, but Sarah gets a flat +$15 for a pricier entrée
+    const items = resolveAdjustments([
+      { price: 90, personIds: ["sarah", "b", "c"], personUnits: { sarah: 15 }, splitType: "adjustment" },
+    ]);
+    // baseline = (90 - 15) / 3 = 25; sarah = 25 + 15 = 40; b = c = 25
+    expect(items[0].personUnits!.sarah).toBeCloseTo(40);
+    expect(items[0].personUnits!.b).toBeCloseTo(25);
+    expect(items[0].personUnits!.c).toBeCloseTo(25);
+  });
+
+  it("always sums exactly to the item price, regardless of how many adjustments are set", () => {
+    const items = resolveAdjustments([
+      { price: 200, personIds: ["a", "b", "c", "d"], personUnits: { a: 20, b: -10 }, splitType: "adjustment" },
+    ]);
+    const sum = Object.values(items[0].personUnits!).reduce((s, v) => s + v, 0);
+    expect(sum).toBeCloseTo(200);
+  });
+
+  it("leaves non-adjustment items completely untouched", () => {
+    const items = resolveAdjustments([{ price: 50, personIds: ["a", "b"], personUnits: { a: 2, b: 1 }, splitType: "shares" }]);
+    expect(items[0].personUnits).toEqual({ a: 2, b: 1 });
+  });
+
+  it("combines correctly with the rest of the split math via computeReceiptShares", () => {
+    const r = {
+      id: "r1", user_id: "u1", merchant: "Test", date: "2026-01-01",
+      subtotal: 90, tax: 0, tip: 0, additional_tip: 0, discount: 0, total: 90,
+      tax_tip_method: "proportional" as const, split_mode: "itemized" as const,
+      category: null, image_path: null, image_mime: null,
+      items: resolveAdjustments([
+        { id: "i1", receipt_id: "r1", name: "Dinner", price: 90, quantity: 1, discount: 0, category: "Food" as const, personIds: ["sarah", "b", "c"], personUnits: { sarah: 15 }, splitType: "adjustment" },
+      ]),
+    };
+    const shares = computeReceiptShares(r);
+    expect(shares.sarah.total).toBeCloseTo(40);
+    expect(shares.b.total).toBeCloseTo(25);
+    expect(shares.c.total).toBeCloseTo(25);
+  });
+});
+
+describe("computeReceiptShares — whole-bill mode respects weighting (Shares/Exact/%/Adjustment)", () => {
+  it("splits by shares instead of forcing pure equal division when weights are set", () => {
+    const r = {
+      id: "r1", user_id: "u1", merchant: "Test", date: "2026-01-01",
+      subtotal: 0, tax: 0, tip: 0, additional_tip: 0, discount: 0, total: 100,
+      tax_tip_method: "proportional" as const, split_mode: "even" as const,
+      category: null, image_path: null, image_mime: null,
+      items: [{ id: "i1", receipt_id: "r1", name: "Whole bill", price: 100, quantity: 1, discount: 0, category: "Other" as const, personIds: ["a", "b"], personUnits: { a: 3, b: 1 } }],
+    };
+    const shares = computeReceiptShares(r);
+    expect(shares.a.total).toBeCloseTo(75); // 3/4 of 100
+    expect(shares.b.total).toBeCloseTo(25); // 1/4 of 100
+  });
+
+  it("still splits purely evenly when no weights are set (unchanged default behavior)", () => {
+    const r = {
+      id: "r1", user_id: "u1", merchant: "Test", date: "2026-01-01",
+      subtotal: 0, tax: 0, tip: 0, additional_tip: 0, discount: 0, total: 90,
+      tax_tip_method: "proportional" as const, split_mode: "even" as const,
+      category: null, image_path: null, image_mime: null,
+      items: [{ id: "i1", receipt_id: "r1", name: "Whole bill", price: 90, quantity: 1, discount: 0, category: "Other" as const, personIds: ["a", "b", "c"], personUnits: {} }],
+    };
+    const shares = computeReceiptShares(r);
+    expect(shares.a.total).toBeCloseTo(30);
+    expect(shares.b.total).toBeCloseTo(30);
+    expect(shares.c.total).toBeCloseTo(30);
   });
 });

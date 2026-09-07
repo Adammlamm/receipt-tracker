@@ -10,6 +10,30 @@ export interface PersonShare {
 }
 
 /**
+ * Resolves "Adjustment" mode into the same weighted-dollar representation used
+ * everywhere else: baseline = (price - sum of adjustments) / N, split evenly,
+ * then each person's flat +/- adjustment is layered on top. The result always
+ * sums to exactly the item price, by construction — no reconciliation needed.
+ */
+export function resolveAdjustments<
+  T extends { price: number; personIds: string[]; personUnits?: Record<string, number>; splitType?: string }
+>(items: T[]): T[] {
+  return items.map((item) => {
+    if (item.splitType !== "adjustment") return item;
+    const n = item.personIds.length;
+    if (n === 0) return item;
+    const adjustments = item.personUnits || {};
+    const sumAdjustments = item.personIds.reduce((s, pid) => s + (adjustments[pid] ?? 0), 0);
+    const baseline = (item.price - sumAdjustments) / n;
+    const resolved: Record<string, number> = {};
+    for (const pid of item.personIds) {
+      resolved[pid] = baseline + (adjustments[pid] ?? 0);
+    }
+    return { ...item, personUnits: resolved };
+  });
+}
+
+/**
  * Follows a chain of "covered by" relationships to the final person who actually
  * pays (e.g. if A is covered by B, and B is covered by C, A resolves to C).
  * Stops at the first cycle it detects rather than looping forever.
@@ -59,18 +83,22 @@ export function computeReceiptShares(receipt: Receipt): Record<string, PersonSha
   };
 
   if (receipt.split_mode === "even") {
-    // Whole-bill-evenly mode: split the actual total across whoever's in, directly —
-    // no dependency on subtotal/tax/tip being filled in separately, since everyone
-    // pays the same share of everything either way.
+    // Whole-bill mode: split the actual total across whoever's in, directly —
+    // no dependency on subtotal/tax/tip being filled in separately. Respects
+    // per-person weighting (Shares/Exact/%/Adjustment) if set, otherwise
+    // divides purely evenly.
     const item = (receipt.items ?? [])[0];
     const people = item?.personIds ?? [];
     if (people.length > 0) {
-      const each = (Number(receipt.total) || 0) / people.length;
+      const unitsMap = item?.personUnits || {};
+      const totalUnits = people.reduce((sum, pid) => sum + (unitsMap[pid] ?? 1), 0) || people.length;
       people.forEach((pid) => {
+        const units = unitsMap[pid] ?? 1;
+        const share = (Number(receipt.total) || 0) * (units / totalUnits);
         const s = ensure(pid);
-        s.other = each;
-        s.itemSubtotal = each;
-        s.total = each;
+        s.other = share;
+        s.itemSubtotal = share;
+        s.total = share;
       });
     }
   } else {

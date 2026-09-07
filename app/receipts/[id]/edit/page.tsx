@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Plus, Trash2, X, CheckCircle2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { computeReceiptShares, applyItemCoverage } from "@/lib/split";
+import { computeReceiptShares, applyItemCoverage, resolveAdjustments } from "@/lib/split";
 import { Category, Person, Group, TaxTipMethod, ReceiptCategory } from "@/lib/types";
 import { splitName } from "@/lib/utils";
 
@@ -24,7 +24,7 @@ interface DraftItem {
   category: Category;
   personIds: string[];
   personUnits: Record<string, number>;
-  splitType: "even" | "shares" | "exact" | "percent";
+  splitType: "even" | "shares" | "exact" | "percent" | "adjustment";
 }
 
 type Phase = "basics" | "participants" | "items" | "review";
@@ -54,6 +54,8 @@ export default function EditReceiptPage() {
   const [taxTipMethod, setTaxTipMethod] = useState<TaxTipMethod>("proportional");
   const [splitMode, setSplitMode] = useState<"itemized" | "even">("itemized");
   const [evenParticipants, setEvenParticipants] = useState<string[]>([]);
+  const [evenSplitType, setEvenSplitType] = useState<"even" | "shares" | "exact" | "percent" | "adjustment">("even");
+  const [evenPersonUnits, setEvenPersonUnits] = useState<Record<string, number>>({});
   const [newPersonName, setNewPersonName] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -95,6 +97,11 @@ export default function EditReceiptPage() {
         if (evenItem) {
           const splitsForItem = (dbSplits ?? []).filter((s) => s.item_id === evenItem.id);
           setEvenParticipants(splitsForItem.map((s) => s.person_id));
+          const units = Object.fromEntries(splitsForItem.map((s) => [s.person_id, s.units ?? 1]));
+          const values = Object.values(units);
+          const allSame = values.length > 0 && values.every((v) => v === values[0]);
+          setEvenPersonUnits(units);
+          setEvenSplitType(allSame ? "even" : "shares");
         }
       } else {
         setItems(
@@ -158,6 +165,8 @@ export default function EditReceiptPage() {
         } else if (type === "percent") {
           const each = Math.round((100 / count) * 100) / 100;
           personUnits = Object.fromEntries(it.personIds.map((pid) => [pid, each]));
+        } else if (type === "adjustment") {
+          personUnits = Object.fromEntries(it.personIds.map((pid) => [pid, 0]));
         }
         return { ...it, splitType: type, personUnits };
       })
@@ -201,8 +210,8 @@ export default function EditReceiptPage() {
             quantity: 1,
             category: "Other" as Category,
             personIds: evenParticipants,
-            personUnits: {} as Record<string, number>,
-            splitType: "even" as const,
+            personUnits: evenPersonUnits,
+            splitType: evenSplitType,
           },
         ]
       : items
@@ -210,7 +219,7 @@ export default function EditReceiptPage() {
           .map((it) => ({ ...it, price: Number(it.price), discount: Number(it.discount) || 0 }));
 
   const rawParticipantIds = Array.from(new Set(validItems.flatMap((it) => it.personIds)));
-  const coveredItems = applyItemCoverage(validItems, coverage);
+  const coveredItems = applyItemCoverage(resolveAdjustments(validItems), coverage);
 
   const draftReceipt = {
     merchant: merchant.trim() || "Untitled receipt",
@@ -450,17 +459,153 @@ export default function EditReceiptPage() {
             ))}
           </div>
 
-          {evenParticipants.length > 0 && (
-            <p className="text-[13px] text-muted mb-6">
-              {money((Number(total) || Number(subtotal) || 0) / evenParticipants.length)} each · {evenParticipants.length} people
-            </p>
-          )}
+          {evenParticipants.length > 0 && (() => {
+            const wholeBillTotal = Number(total) || (Number(subtotal) || 0) + (Number(tax) || 0) + (Number(tip) || 0) + (Number(additionalTip) || 0) - (Number(discount) || 0);
+            function setEvenType(type: typeof evenSplitType) {
+              const count = evenParticipants.length || 1;
+              let units: Record<string, number> = {};
+              if (type === "shares") units = Object.fromEntries(evenParticipants.map((pid) => [pid, 1]));
+              else if (type === "exact") {
+                const each = Math.round((wholeBillTotal / count) * 100) / 100;
+                units = Object.fromEntries(evenParticipants.map((pid) => [pid, each]));
+              } else if (type === "percent") {
+                const each = Math.round((100 / count) * 100) / 100;
+                units = Object.fromEntries(evenParticipants.map((pid) => [pid, each]));
+              } else if (type === "adjustment") {
+                units = Object.fromEntries(evenParticipants.map((pid) => [pid, 0]));
+              }
+              setEvenSplitType(type);
+              setEvenPersonUnits(units);
+            }
+            function setEvenWeight(pid: string, value: number) {
+              setEvenPersonUnits((prev) => ({ ...prev, [pid]: Math.max(evenSplitType === "adjustment" ? -Infinity : 0, value) }));
+            }
+            return (
+              <div className="bg-white rounded-xl border border-line p-3.5 mb-6">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">How should this split?</p>
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {(["even", "shares", "exact", "percent", "adjustment"] as const).map((t) => (
+                    <button key={t} onClick={() => setEvenType(t)}
+                      className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border ${evenSplitType === t ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
+                      {t === "even" ? "Evenly" : t === "shares" ? "Shares" : t === "exact" ? "Exact $" : t === "percent" ? "%" : "Adjustment"}
+                    </button>
+                  ))}
+                </div>
+
+                {evenSplitType === "even" && (
+                  <p className="text-[13px] text-muted">{money(wholeBillTotal / evenParticipants.length)} each · {evenParticipants.length} people</p>
+                )}
+
+                {evenSplitType === "shares" && (
+                  <div className="space-y-1.5">
+                    {evenParticipants.map((pid) => {
+                      const person = people.find((p) => p.id === pid);
+                      const units = evenPersonUnits[pid] ?? 1;
+                      const totalUnits = evenParticipants.reduce((s, id) => s + (evenPersonUnits[id] ?? 1), 0);
+                      const share = wholeBillTotal * (units / totalUnits);
+                      return (
+                        <div key={pid} className="flex items-center justify-between">
+                          <span className="text-[13px] text-[#3A382F]">{person?.name}</span>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => setEvenWeight(pid, Math.max(0, units - 1))} className="w-7 h-7 rounded-full bg-[#F0EDE1] text-[#5B5748] text-[15px] font-semibold">−</button>
+                            <span className="w-5 text-center text-[13px] font-medium">{units}</span>
+                            <button onClick={() => setEvenWeight(pid, units + 1)} className="w-7 h-7 rounded-full bg-[#F0EDE1] text-[#5B5748] text-[15px] font-semibold">+</button>
+                            <span className="w-16 text-right font-mono text-[12px] text-muted">{money(share)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {evenSplitType === "exact" && (
+                  <div className="space-y-1.5">
+                    {evenParticipants.map((pid) => {
+                      const person = people.find((p) => p.id === pid);
+                      const amt = evenPersonUnits[pid] ?? 0;
+                      return (
+                        <div key={pid} className="flex items-center justify-between gap-2">
+                          <span className="text-[13px] text-[#3A382F] flex-1">{person?.name}</span>
+                          <input inputMode="decimal" value={amt || ""} onChange={(e) => setEvenWeight(pid, Number(e.target.value) || 0)}
+                            placeholder="0.00" className="w-20 rounded-lg border border-line bg-white px-2 py-1.5 text-[13px] text-right outline-none" />
+                        </div>
+                      );
+                    })}
+                    {(() => {
+                      const sum = evenParticipants.reduce((s, pid) => s + (evenPersonUnits[pid] ?? 0), 0);
+                      const diff = Math.round((wholeBillTotal - sum) * 100) / 100;
+                      return (
+                        <p className={`text-[11px] mt-1 ${Math.abs(diff) < 0.01 ? "text-accent" : "text-owe"}`}>
+                          {Math.abs(diff) < 0.01 ? "Matches total ✓" : diff > 0 ? `${money(diff)} unassigned` : `${money(Math.abs(diff))} over`}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {evenSplitType === "percent" && (
+                  <div className="space-y-1.5">
+                    {evenParticipants.map((pid) => {
+                      const person = people.find((p) => p.id === pid);
+                      const pct = evenPersonUnits[pid] ?? 0;
+                      return (
+                        <div key={pid} className="flex items-center justify-between gap-2">
+                          <span className="text-[13px] text-[#3A382F] flex-1">{person?.name}</span>
+                          <div className="flex items-center gap-1">
+                            <input inputMode="decimal" value={pct || ""} onChange={(e) => setEvenWeight(pid, Number(e.target.value) || 0)}
+                              placeholder="0" className="w-14 rounded-lg border border-line bg-white px-2 py-1.5 text-[13px] text-right outline-none" />
+                            <span className="text-[12px] text-muted">%</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {(() => {
+                      const sum = evenParticipants.reduce((s, pid) => s + (evenPersonUnits[pid] ?? 0), 0);
+                      const diff = Math.round((100 - sum) * 100) / 100;
+                      return (
+                        <p className={`text-[11px] mt-1 ${Math.abs(diff) < 0.01 ? "text-accent" : "text-owe"}`}>
+                          {Math.abs(diff) < 0.01 ? "Totals 100% ✓" : diff > 0 ? `${diff}% unassigned` : `${Math.abs(diff)}% over`}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {evenSplitType === "adjustment" && (() => {
+                  const n = evenParticipants.length || 1;
+                  const sumAdj = evenParticipants.reduce((s, pid) => s + (evenPersonUnits[pid] ?? 0), 0);
+                  const baseline = (wholeBillTotal - sumAdj) / n;
+                  return (
+                    <div className="space-y-1.5">
+                      {evenParticipants.map((pid) => {
+                        const person = people.find((p) => p.id === pid);
+                        const adj = evenPersonUnits[pid] ?? 0;
+                        return (
+                          <div key={pid} className="flex items-center justify-between gap-2">
+                            <span className="text-[13px] text-[#3A382F] flex-1">{person?.name}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-muted">+/−</span>
+                              <input inputMode="decimal" value={adj || ""} onChange={(e) => setEvenWeight(pid, Number(e.target.value) || 0)}
+                                placeholder="0.00" className="w-16 rounded-lg border border-line bg-white px-2 py-1.5 text-[13px] text-right outline-none" />
+                              <span className="w-16 text-right font-mono text-[12px] text-muted">{money(baseline + adj)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <p className="text-[11px] text-muted mt-1">Base splits evenly; adjustments add or subtract on top.</p>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
 
           <button onClick={() => setPhase("review")} disabled={evenParticipants.length === 0}
             className="w-full rounded-xl bg-accent text-white font-semibold py-3.5 mb-6 disabled:opacity-40">
             Review split
           </button>
         </div>
+
       )}
 
       {phase === "items" && (
@@ -550,10 +695,10 @@ export default function EditReceiptPage() {
                   <div className="mt-3 pt-3 border-t border-[#EDE9DC]">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Split</p>
                     <div className="flex gap-1.5 mb-3">
-                      {(["even", "shares", "exact", "percent"] as const).map((t) => (
+                      {(["even", "shares", "exact", "percent", "adjustment"] as const).map((t) => (
                         <button key={t} onClick={() => setSplitType(it.id, t)}
                           className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border ${it.splitType === t ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
-                          {t === "even" ? "Evenly" : t === "shares" ? "Shares" : t === "exact" ? "Exact $" : "%"}
+                          {t === "even" ? "Evenly" : t === "shares" ? "Shares" : t === "exact" ? "Exact $" : t === "percent" ? "%" : "Adjustment"}
                         </button>
                       ))}
                     </div>
@@ -638,6 +783,33 @@ export default function EditReceiptPage() {
                             </p>
                           );
                         })()}
+                      </div>
+                    )}
+                    {it.splitType === "adjustment" && (
+                      <div className="space-y-1.5">
+                        {(() => {
+                          const effectivePrice = Math.max(0, (Number(it.price) || 0) - (Number(it.discount) || 0));
+                          const n = it.personIds.length || 1;
+                          const sumAdj = it.personIds.reduce((s, pid) => s + (it.personUnits[pid] ?? 0), 0);
+                          const baseline = (effectivePrice - sumAdj) / n;
+                          return it.personIds.map((pid) => {
+                            const person = people.find((p) => p.id === pid);
+                            const adj = it.personUnits[pid] ?? 0;
+                            const finalAmt = baseline + adj;
+                            return (
+                              <div key={pid} className="flex items-center justify-between gap-2">
+                                <span className="text-[13px] text-[#3A382F] flex-1">{person?.name}</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[11px] text-muted">+/−</span>
+                                  <input inputMode="decimal" value={adj || ""} onChange={(e) => setWeight(it.id, pid, Number(e.target.value) || 0)}
+                                    placeholder="0.00" className="w-16 rounded-lg border border-line bg-white px-2 py-1.5 text-[13px] text-right outline-none" />
+                                  <span className="w-16 text-right font-mono text-[12px] text-muted">{money(finalAmt)}</span>
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                        <p className="text-[11px] text-muted mt-1">Base splits evenly; adjustments add or subtract on top.</p>
                       </div>
                     )}
                   </div>
