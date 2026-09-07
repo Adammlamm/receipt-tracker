@@ -37,17 +37,17 @@ async function loadOwnerReceiptsAndPayments(supabase: ReturnType<typeof createSe
   return { receipts, payments: (payments ?? []) as Payment[] };
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, { params }: { params: { slug: string } }) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ error: "This feature isn't fully configured yet." }, { status: 500 });
   }
   const supabase = createServiceClient();
-  const personId = params.id;
 
-  const { data: person } = await supabase.from("people").select("*").eq("id", personId).maybeSingle();
+  const { data: person } = await supabase.from("people").select("*").eq("share_slug", params.slug).maybeSingle();
   if (!person) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
+  const personId = person.id;
 
   const { data: owner } = await supabase
     .from("people")
@@ -90,17 +90,17 @@ export async function GET(request: Request, { params }: { params: { id: string }
   });
 }
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: { slug: string } }) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ error: "This feature isn't fully configured yet." }, { status: 500 });
   }
   const supabase = createServiceClient();
-  const personId = params.id;
 
-  const { data: existing } = await supabase.from("people").select("id").eq("id", personId).maybeSingle();
+  const { data: existing } = await supabase.from("people").select("id").eq("share_slug", params.slug).maybeSingle();
   if (!existing) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
+  const personId = existing.id;
 
   const body = await request.json();
   // Explicit whitelist — never spread the raw body into an update.

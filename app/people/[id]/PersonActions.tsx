@@ -36,7 +36,7 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
   }
 
   async function shareLink() {
-    const url = `${window.location.origin}/friend/${person.id}`;
+    const url = `${window.location.origin}/friend/${person.share_slug}`;
     if (navigator.share) {
       try {
         await navigator.share({ title: "Add your payment info", text: `Hey — add your Venmo/Zelle so I know how to pay you back:`, url });

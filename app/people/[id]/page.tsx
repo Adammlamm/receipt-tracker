@@ -24,7 +24,7 @@ export default async function PersonDetailPage({ params }: { params: { id: strin
 
   const owner = people.find((p) => p.is_self);
   const host = headers().get("host");
-  const friendLink = host ? `https://${host}/friend/${person.id}` : "";
+  const friendLink = host ? `https://${host}/friend/${person.share_slug}` : "";
 
   const unpaidReceipts = personReceipts.filter(({ receipt }) => remainingMap[receipt.id] > 0.005);
   const receiptSummary =

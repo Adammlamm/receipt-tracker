@@ -42,7 +42,7 @@ interface FriendInfo {
 
 export default function FriendPage() {
   const params = useParams();
-  const personId = params.id as string;
+  const slug = params.slug as string;
 
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -62,7 +62,7 @@ export default function FriendPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/friend/${personId}`);
+        const res = await fetch(`/api/friend/${slug}`);
         if (!res.ok) {
           setNotFound(true);
         } else {
@@ -81,12 +81,12 @@ export default function FriendPage() {
         setLoading(false);
       }
     })();
-  }, [personId]);
+  }, [slug]);
 
   async function save() {
     setSaving(true);
     try {
-      const res = await fetch(`/api/friend/${personId}`, {
+      const res = await fetch(`/api/friend/${slug}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

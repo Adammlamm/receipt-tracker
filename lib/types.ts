@@ -15,6 +15,7 @@ export interface Person {
   payment_handle: string | null;
   phone_number: string | null;
   reminder_template: string | null;
+  share_slug: string;
   created_at: string;
 }
 
