@@ -1,6 +1,6 @@
 export type Category = "Food" | "Drinks" | "Other";
 export type TaxTipMethod = "proportional" | "equal";
-export type PaymentMethod = "Venmo" | "Zelle" | "Apple Cash" | "Cash" | "PayPal" | "Other";
+export type PaymentMethod = "Venmo" | "Zelle" | "Apple Cash" | "Cash App" | "Cash" | "PayPal" | "Other";
 
 export type ReceiptCategory = "Dining" | "Trips" | "Roommates/Home" | "Transportation" | "Other";
 

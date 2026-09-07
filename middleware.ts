@@ -29,7 +29,8 @@ export async function middleware(request: NextRequest) {
 
   const isAuthRoute = request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/auth") ||
-    request.nextUrl.pathname.startsWith("/friend");
+    request.nextUrl.pathname.startsWith("/friend") ||
+    request.nextUrl.pathname.startsWith("/api/friend");
 
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone();

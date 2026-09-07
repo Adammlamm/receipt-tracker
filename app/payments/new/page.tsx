@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { allocatePersonPayments } from "@/lib/split";
 import { Person, Receipt, Payment, PaymentMethod } from "@/lib/types";
 
-const METHODS: PaymentMethod[] = ["Venmo", "Zelle", "Apple Cash", "Cash", "PayPal", "Other"];
+const METHODS: PaymentMethod[] = ["Venmo", "Zelle", "Apple Cash", "Cash App", "Cash", "PayPal", "Other"];
 
 function money(n: number) {
   return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });

@@ -6,7 +6,7 @@ import { Pencil, Trash2, Check, X, Merge, Share2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Person, PaymentMethod } from "@/lib/types";
 
-const METHODS: PaymentMethod[] = ["Venmo", "Zelle", "Apple Cash", "Cash", "PayPal", "Other"];
+const METHODS: PaymentMethod[] = ["Venmo", "Zelle", "Apple Cash", "Cash App", "Cash", "PayPal", "Other"];
 
 export default function PersonActions({ person, allPeople }: { person: Person; allPeople: Person[] }) {
   const router = useRouter();

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeReceiptShares, allocatePersonPayments } from "../split";
+import { buildPaymentLink, supportsPaymentLink } from "../paymentLinks";
 import type { Receipt, ReceiptItem, Payment } from "../types";
 
 /** Minimal item factory so each test only states what it cares about. */
@@ -285,5 +286,39 @@ describe("allocatePersonPayments", () => {
   it("never reports a negative remaining balance from an overpayment", () => {
     const alloc = allocatePersonPayments("a", [baseReceipt], [payment({ amount: 150 })]);
     expect(alloc.remainingMap.r1).toBe(0);
+  });
+});
+
+describe("buildPaymentLink", () => {
+  it("builds a Venmo pay link with amount and note", () => {
+    const url = buildPaymentLink("Venmo", "@adamlam", 42.5, "Receipt Tracker");
+    expect(url).toBe("https://venmo.com/adamlam?txn=pay&amount=42.50&note=Receipt%20Tracker");
+  });
+
+  it("builds a PayPal.me link", () => {
+    expect(buildPaymentLink("PayPal", "adamlam", 42.5, "x")).toBe("https://paypal.me/adamlam/42.50");
+  });
+
+  it("builds a Cash App cashtag link, normalizing a leading $", () => {
+    expect(buildPaymentLink("Cash App", "$adamlam", 42.5, "x")).toBe("https://cash.app/$adamlam/42.50");
+  });
+
+  it("returns null for methods with no universal payment link", () => {
+    expect(buildPaymentLink("Zelle", "adam@email.com", 42.5, "x")).toBeNull();
+    expect(buildPaymentLink("Apple Cash", "555-1234", 42.5, "x")).toBeNull();
+    expect(buildPaymentLink("Cash", "", 42.5, "x")).toBeNull();
+  });
+
+  it("returns null for a zero or negative amount", () => {
+    expect(buildPaymentLink("Venmo", "@adamlam", 0, "x")).toBeNull();
+  });
+
+  it("reports which methods support pre-filled links", () => {
+    expect(supportsPaymentLink("Venmo")).toBe(true);
+    expect(supportsPaymentLink("PayPal")).toBe(true);
+    expect(supportsPaymentLink("Cash App")).toBe(true);
+    expect(supportsPaymentLink("Zelle")).toBe(false);
+    expect(supportsPaymentLink("Apple Cash")).toBe(false);
+    expect(supportsPaymentLink(null)).toBe(false);
   });
 });
