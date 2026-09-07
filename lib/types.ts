@@ -54,6 +54,7 @@ export interface Receipt {
   category: ReceiptCategory | null;
   image_path: string | null;
   image_mime: string | null;
+  notes: string | null;
   items: ReceiptItem[];
 }
 

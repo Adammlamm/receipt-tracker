@@ -24,6 +24,7 @@ interface ReceiptRow {
   paid: number;
   remaining: number;
   items: { name: string; category: string }[];
+  notes: string | null;
 }
 
 interface FriendInfo {
@@ -226,6 +227,9 @@ export default function FriendPage() {
                         {r.remaining > 0.005 ? `${money(r.remaining)} due` : "Paid"}
                       </span>
                     </div>
+                    {r.notes && (
+                      <p className="text-[11px] text-[#7A5E24] bg-[#FBF3E6] rounded-lg px-2.5 py-1.5 mt-1.5">{r.notes}</p>
+                    )}
                   </div>
                 ))}
               </div>

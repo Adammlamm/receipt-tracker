@@ -79,6 +79,13 @@ export default async function ReceiptDetailPage({ params }: { params: { id: stri
           </div>
         </div>
 
+        {receipt.notes && (
+          <div className="bg-[#FBF3E6] border border-[#EEDDB8] rounded-xl p-4 mb-5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-[#7A5E24] mb-1.5">Notes</p>
+            <p className="text-[13px] text-[#7A5E24] whitespace-pre-wrap">{receipt.notes}</p>
+          </div>
+        )}
+
         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Who owes what</p>
         <div className="space-y-2 mb-8">
           {Object.entries(shares).map(([pid, s]) => (

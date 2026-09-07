@@ -50,6 +50,7 @@ export default function EditReceiptPage() {
   const [total, setTotal] = useState("");
   const [selectedTipPct, setSelectedTipPct] = useState<number | null>(null);
   const [receiptCategory, setReceiptCategory] = useState<ReceiptCategory | null>(null);
+  const [notes, setNotes] = useState("");
   const [items, setItems] = useState<DraftItem[]>([]);
   const [taxTipMethod, setTaxTipMethod] = useState<TaxTipMethod>("proportional");
   const [splitMode, setSplitMode] = useState<"itemized" | "even">("itemized");
@@ -85,6 +86,7 @@ export default function EditReceiptPage() {
       setTaxTipMethod(receipt.tax_tip_method || "proportional");
       setSplitMode(receipt.split_mode || "itemized");
       setReceiptCategory(receipt.category || null);
+      setNotes(receipt.notes || "");
 
       const { data: dbItems } = await supabase.from("receipt_items").select("*").eq("receipt_id", receiptId);
       const itemIds = (dbItems ?? []).map((i) => i.id);
@@ -266,6 +268,7 @@ export default function EditReceiptPage() {
         tax_tip_method: taxTipMethod,
         split_mode: splitMode,
         category: receiptCategory,
+        notes: notes.trim() || null,
       })
       .eq("id", receiptId);
 
@@ -415,6 +418,15 @@ export default function EditReceiptPage() {
               </button>
             ))}
           </div>
+
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Notes (optional)</p>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Add context anyone splitting this might want — e.g. why the tip was extra, or what the delivery fee covered."
+            rows={3}
+            className="w-full rounded-xl border border-line bg-white px-3.5 py-3 text-[14px] outline-none focus:ring-2 focus:ring-accent/40 mb-6"
+          />
 
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">How do you want to split it?</p>
           <div className="flex gap-1.5 mb-6">

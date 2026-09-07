@@ -72,6 +72,7 @@ export async function GET(request: Request, { params }: { params: { slug: string
       paid: alloc.paidMap[receipt.id] ?? 0,
       remaining: alloc.remainingMap[receipt.id] ?? 0,
       items: myItems,
+      notes: receipt.notes,
     };
   });
 
