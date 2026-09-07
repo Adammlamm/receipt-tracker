@@ -11,6 +11,7 @@ export interface Person {
   is_self: boolean;
   preferred_payment_method: PaymentMethod | null;
   payment_handle: string | null;
+  phone_number: string | null;
   created_at: string;
 }
 

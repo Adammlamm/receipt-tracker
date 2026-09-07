@@ -15,6 +15,7 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
   const [name, setName] = useState(person.name);
   const [method, setMethod] = useState<PaymentMethod | null>(person.preferred_payment_method);
   const [handle, setHandle] = useState(person.payment_handle || "");
+  const [phone, setPhone] = useState(person.phone_number || "");
   const [saving, setSaving] = useState(false);
   const [merging, setMerging] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
@@ -47,7 +48,7 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
 
   async function savePaymentInfo() {
     setSaving(true);
-    await supabase.from("people").update({ preferred_payment_method: method, payment_handle: handle.trim() || null }).eq("id", person.id);
+    await supabase.from("people").update({ preferred_payment_method: method, payment_handle: handle.trim() || null, phone_number: phone.trim() || null }).eq("id", person.id);
     setSaving(false);
     router.refresh();
   }
@@ -210,6 +211,14 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
             className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-accent/40 mb-3"
           />
         )}
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Phone number</p>
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          type="tel"
+          placeholder="(555) 555-5555"
+          className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-accent/40 mb-3"
+        />
         <button onClick={savePaymentInfo} disabled={saving} className="text-[12px] font-semibold text-accent">
           {saving ? "Saving…" : "Save"}
         </button>
