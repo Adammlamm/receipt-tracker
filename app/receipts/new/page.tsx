@@ -330,10 +330,11 @@ export default function AddReceiptPage() {
 
   // Reconciliation
   const calculatedTotal =
-    draftReceipt.subtotal + draftReceipt.tax + draftReceipt.tip - draftReceipt.discount;
+    draftReceipt.subtotal + draftReceipt.tax + draftReceipt.tip + draftReceipt.additional_tip - draftReceipt.discount;
   const totalDifference = Math.round((draftReceipt.total - calculatedTotal) * 100) / 100;
   const assignedTotal = Object.values(shares).reduce((s: number, sh: any) => s + sh.total, 0);
-  const unassigned = Math.round((draftReceipt.total - assignedTotal) * 100) / 100;
+  const unassignedCheckTotal = splitMode === "even" ? draftReceipt.total : calculatedTotal;
+  const unassigned = Math.round((unassignedCheckTotal - assignedTotal) * 100) / 100;
   const unassignedItems = splitMode === "itemized" ? validItems.filter((it) => it.personIds.length === 0) : [];
 
   async function save() {
