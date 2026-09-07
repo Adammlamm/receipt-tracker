@@ -14,6 +14,7 @@ export interface Person {
   preferred_payment_method: PaymentMethod | null;
   payment_handle: string | null;
   phone_number: string | null;
+  reminder_template: string | null;
   created_at: string;
 }
 

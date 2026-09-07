@@ -380,4 +380,37 @@ describe("buildReminderSmsLink", () => {
     const decoded = decodeURIComponent(url);
     expect(decoded).not.toContain("send it via");
   });
+
+  it("uses a custom template and substitutes every placeholder", () => {
+    const url = buildReminderSmsLink({
+      phone: "5551234567",
+      friendFirstName: "Joseph",
+      totalRemaining: 42.12,
+      receiptSummary: "King Pocha (Jul 10)",
+      ownerMethod: "Venmo",
+      ownerHandle: "@adamlam",
+      friendPreferredMethod: "Zelle",
+      friendLink: "https://example.com/friend/abc",
+      template: "yo {name}, you owe {amount} for {receipt}. hit me on {method} ({handle}) — I know you're usually on {their_method} tho. info: {link}",
+    });
+    const decoded = decodeURIComponent(url);
+    expect(decoded).toContain(
+      "yo Joseph, you owe $42.12 for King Pocha (Jul 10). hit me on Venmo (@adamlam) — I know you're usually on Zelle tho. info: https://example.com/friend/abc"
+    );
+  });
+
+  it("leaves a placeholder as an empty string if the underlying value is missing", () => {
+    const url = buildReminderSmsLink({
+      phone: "5551234567",
+      friendFirstName: "Joseph",
+      totalRemaining: 42.12,
+      receiptSummary: "x",
+      ownerMethod: null,
+      ownerHandle: null,
+      friendLink: "https://x.com",
+      template: "Pay via {method}: {handle}",
+    });
+    const decoded = decodeURIComponent(url);
+    expect(decoded).toContain("Pay via : ");
+  });
 });

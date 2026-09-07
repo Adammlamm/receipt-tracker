@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2, Check, X, Merge, Share2 } from "lucide-react";
+import { Pencil, Trash2, Check, X, Merge, Share2, MessageCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Person, PaymentMethod } from "@/lib/types";
+import { DEFAULT_REMINDER_TEMPLATE_WITH_METHOD, REMINDER_PLACEHOLDERS } from "@/lib/paymentLinks";
 
 const METHODS: PaymentMethod[] = ["Venmo", "Zelle", "Apple Cash", "Cash App", "Cash", "PayPal", "Other"];
 
@@ -17,6 +18,8 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
   const [method, setMethod] = useState<PaymentMethod | null>(person.preferred_payment_method);
   const [handle, setHandle] = useState(person.payment_handle || "");
   const [phone, setPhone] = useState(person.phone_number || "");
+  const [template, setTemplate] = useState(person.reminder_template || "");
+  const [templateSaved, setTemplateSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [merging, setMerging] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState<string>("");
@@ -24,6 +27,13 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
   const [linkCopied, setLinkCopied] = useState(false);
 
   const otherPeople = allPeople.filter((p) => p.id !== person.id);
+
+  async function saveTemplate() {
+    await supabase.from("people").update({ reminder_template: template.trim() || null }).eq("id", person.id);
+    setTemplateSaved(true);
+    setTimeout(() => setTemplateSaved(false), 2000);
+    router.refresh();
+  }
 
   async function shareLink() {
     const url = `${window.location.origin}/friend/${person.id}`;
@@ -247,6 +257,37 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
           {saving ? "Saving…" : "Save"}
         </button>
       </div>
+
+      {person.is_self && (
+        <div className="bg-white rounded-xl border border-line p-3.5 mt-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5 flex items-center gap-1.5">
+            <MessageCircle size={12} /> Reminder text message
+          </p>
+          <p className="text-[11px] text-muted mb-2">Customize the wording — tap a placeholder to add it.</p>
+          <textarea
+            value={template}
+            onChange={(e) => setTemplate(e.target.value)}
+            placeholder={DEFAULT_REMINDER_TEMPLATE_WITH_METHOD}
+            rows={4}
+            className="w-full rounded-lg border border-line bg-white px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-accent/40 mb-2"
+          />
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {REMINDER_PLACEHOLDERS.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setTemplate((t) => t + (t && !t.endsWith(" ") ? " " : "") + p.key)}
+                title={p.label}
+                className="px-2.5 py-1 rounded-full text-[11px] font-mono font-medium border bg-[#F0EDE1] text-[#5B5748] border-line"
+              >
+                {p.key}
+              </button>
+            ))}
+          </div>
+          <button onClick={saveTemplate} className="text-[12px] font-semibold text-accent">
+            {templateSaved ? "Saved!" : "Save template"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

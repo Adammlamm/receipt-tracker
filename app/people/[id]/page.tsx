@@ -41,7 +41,9 @@ export default async function PersonDetailPage({ params }: { params: { id: strin
           receiptSummary,
           ownerMethod: owner?.preferred_payment_method ?? null,
           ownerHandle: owner?.payment_handle ?? null,
+          friendPreferredMethod: person.preferred_payment_method,
           friendLink,
+          template: owner?.reminder_template ?? null,
         })
       : null;
 
