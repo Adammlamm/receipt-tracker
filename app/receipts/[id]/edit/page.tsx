@@ -459,6 +459,16 @@ export default function EditReceiptPage() {
 
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Who was there?</p>
           <div className="flex flex-wrap gap-1.5 mb-4">
+            <button onClick={() => setEvenParticipants([])}
+              className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-white text-owe border-line">
+              Unselect all
+            </button>
+            {people.some((p) => p.is_self) && (
+              <button onClick={() => setEvenParticipants([people.find((p) => p.is_self)!.id])}
+                className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-white text-[#5B5748] border-line">
+                Just me
+              </button>
+            )}
             <button onClick={() => setEvenParticipants(people.map((p) => p.id))}
               className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${evenParticipants.length === people.length && people.length > 0 ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
               Everyone
@@ -685,6 +695,16 @@ export default function EditReceiptPage() {
                 </div>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Shared by</p>
                 <div className="flex flex-wrap gap-1.5">
+                  <button onClick={() => setItemPeople(it.id, [])}
+                    className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-white text-owe border-line">
+                    Unselect all
+                  </button>
+                  {people.some((p) => p.is_self) && (
+                    <button onClick={() => setItemPeople(it.id, [people.find((p) => p.is_self)!.id])}
+                      className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-white text-[#5B5748] border-line">
+                      Just me
+                    </button>
+                  )}
                   <button onClick={() => setItemPeople(it.id, people.map((p) => p.id))}
                     className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${it.personIds.length === people.length && people.length > 0 ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
                     Everyone
