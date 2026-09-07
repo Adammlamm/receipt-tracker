@@ -1,6 +1,9 @@
+import { headers } from "next/headers";
 import Link from "next/link";
+import { MessageCircle } from "lucide-react";
 import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
 import { allocatePersonPayments } from "@/lib/split";
+import { buildReminderSmsLink } from "@/lib/paymentLinks";
 import BottomNav from "@/components/BottomNav";
 import PersonActions from "./PersonActions";
 
@@ -18,6 +21,29 @@ export default async function PersonDetailPage({ params }: { params: { id: strin
 
   const alloc = allocatePersonPayments(person.id, receipts, payments);
   const { personReceipts, remainingMap, totalRemaining } = alloc;
+
+  const owner = people.find((p) => p.is_self);
+  const host = headers().get("host");
+  const friendLink = host ? `https://${host}/friend/${person.id}` : "";
+
+  const unpaidReceipts = personReceipts.filter(({ receipt }) => remainingMap[receipt.id] > 0.005);
+  const receiptSummary =
+    unpaidReceipts.length === 1
+      ? `${unpaidReceipts[0].receipt.merchant} (${fmtDate(unpaidReceipts[0].receipt.date)})`
+      : `${unpaidReceipts.length} receipts`;
+
+  const reminderLink =
+    person.phone_number && totalRemaining > 0.005 && friendLink
+      ? buildReminderSmsLink({
+          phone: person.phone_number,
+          friendFirstName: person.first_name || person.name,
+          totalRemaining,
+          receiptSummary,
+          ownerMethod: owner?.preferred_payment_method ?? null,
+          ownerHandle: owner?.payment_handle ?? null,
+          friendLink,
+        })
+      : null;
 
   return (
     <div>
@@ -42,10 +68,25 @@ export default async function PersonDetailPage({ params }: { params: { id: strin
 
             <Link
               href={`/payments/new?personId=${person.id}`}
-              className="block text-center rounded-xl bg-accent text-white font-semibold py-3.5 mb-7"
+              className="block text-center rounded-xl bg-accent text-white font-semibold py-3.5 mb-3"
             >
               Record payment
             </Link>
+
+            {reminderLink ? (
+              <a
+                href={reminderLink}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-line bg-white text-ink font-semibold py-3 text-[14px] mb-7"
+              >
+                <MessageCircle size={16} /> Text {person.first_name || person.name} a reminder
+              </a>
+            ) : totalRemaining > 0.005 ? (
+              <p className="text-[12px] text-muted text-center mb-7">
+                Add {person.first_name || person.name}'s phone number below to send a text reminder.
+              </p>
+            ) : (
+              <div className="mb-7" />
+            )}
           </>
         )}
 

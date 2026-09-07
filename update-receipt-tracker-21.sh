@@ -1,3 +1,71 @@
+#!/bin/bash
+set -e
+echo "Applying: one-tap text reminder with payment method and amount owed..."
+
+mkdir -p $(dirname 'lib/paymentLinks.ts')
+cat > 'lib/paymentLinks.ts' << 'FILEEOF'
+import { PaymentMethod } from "./types";
+
+/**
+ * Builds a pre-filled payment link for the methods that support it (Venmo, PayPal,
+ * Cash App). Returns null for methods with no universal web link (Zelle is bank-specific
+ * with no cross-bank URL scheme; Apple Cash has no public link at all) — the UI should
+ * fall back to showing the handle to copy for those.
+ */
+export function buildPaymentLink(method: PaymentMethod, handle: string, amount: number, note: string): string | null {
+  const clean = handle.trim().replace(/^[@$]/, "");
+  if (!clean || amount <= 0) return null;
+  const amt = amount.toFixed(2);
+
+  switch (method) {
+    case "Venmo":
+      return `https://venmo.com/${encodeURIComponent(clean)}?txn=pay&amount=${amt}&note=${encodeURIComponent(note)}`;
+    case "PayPal":
+      return `https://paypal.me/${encodeURIComponent(clean)}/${amt}`;
+    case "Cash App":
+      return `https://cash.app/$${encodeURIComponent(clean)}/${amt}`;
+    default:
+      return null;
+  }
+}
+
+export function supportsPaymentLink(method: PaymentMethod | null): boolean {
+  return method === "Venmo" || method === "PayPal" || method === "Cash App";
+}
+
+/**
+ * Builds a pre-filled text message reminding someone what they owe, mentioning
+ * how to pay you back, with a link to their own page for full details.
+ * Uses both `?body=` and `&body=` since Android and iOS read different ones —
+ * including both is the documented way to cover both without detecting the platform.
+ */
+export function buildReminderSmsLink(params: {
+  phone: string;
+  friendFirstName: string;
+  totalRemaining: number;
+  receiptSummary: string; // e.g. "King Pocha (Jul 10)" or "3 receipts"
+  ownerMethod: PaymentMethod | null;
+  ownerHandle: string | null;
+  friendLink: string;
+}): string {
+  const { phone, friendFirstName, totalRemaining, receiptSummary, ownerMethod, ownerHandle, friendLink } = params;
+  const amount = totalRemaining.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+  let message = `Hi ${friendFirstName}! Just a reminder — you owe ${amount} for ${receiptSummary}.`;
+  if (ownerMethod && ownerHandle) {
+    message += ` You can send it via ${ownerMethod}: ${ownerHandle}.`;
+  }
+  message += ` Details: ${friendLink}`;
+
+  const digitsOnly = phone.replace(/[^\d+]/g, "");
+  const cleanPhone = digitsOnly.length === 10 ? `+1${digitsOnly}` : digitsOnly;
+  const encoded = encodeURIComponent(message);
+  return `sms:${cleanPhone}?body=${encoded}&body=${encoded}`;
+}
+FILEEOF
+
+mkdir -p $(dirname 'lib/__tests__/split.test.ts')
+cat > 'lib/__tests__/split.test.ts' << 'FILEEOF'
 import { describe, it, expect } from "vitest";
 import { computeReceiptShares, allocatePersonPayments } from "../split";
 import { buildPaymentLink, supportsPaymentLink, buildReminderSmsLink } from "../paymentLinks";
@@ -381,3 +449,134 @@ describe("buildReminderSmsLink", () => {
     expect(decoded).not.toContain("send it via");
   });
 });
+FILEEOF
+
+mkdir -p $(dirname 'app/people/[id]/page.tsx')
+cat > 'app/people/[id]/page.tsx' << 'FILEEOF'
+import { headers } from "next/headers";
+import Link from "next/link";
+import { MessageCircle } from "lucide-react";
+import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
+import { allocatePersonPayments } from "@/lib/split";
+import { buildReminderSmsLink } from "@/lib/paymentLinks";
+import BottomNav from "@/components/BottomNav";
+import PersonActions from "./PersonActions";
+
+function money(n: number) {
+  return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+function fmtDate(iso: string) {
+  return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+export default async function PersonDetailPage({ params }: { params: { id: string } }) {
+  const [people, receipts, payments] = await Promise.all([loadPeople(), loadReceipts(), loadPayments()]);
+  const person = people.find((p) => p.id === params.id);
+  if (!person) return <p className="p-5 text-muted text-sm">Person not found.</p>;
+
+  const alloc = allocatePersonPayments(person.id, receipts, payments);
+  const { personReceipts, remainingMap, totalRemaining } = alloc;
+
+  const owner = people.find((p) => p.is_self);
+  const host = headers().get("host");
+  const friendLink = host ? `https://${host}/friend/${person.id}` : "";
+
+  const unpaidReceipts = personReceipts.filter(({ receipt }) => remainingMap[receipt.id] > 0.005);
+  const receiptSummary =
+    unpaidReceipts.length === 1
+      ? `${unpaidReceipts[0].receipt.merchant} (${fmtDate(unpaidReceipts[0].receipt.date)})`
+      : `${unpaidReceipts.length} receipts`;
+
+  const reminderLink =
+    person.phone_number && totalRemaining > 0.005 && friendLink
+      ? buildReminderSmsLink({
+          phone: person.phone_number,
+          friendFirstName: person.first_name || person.name,
+          totalRemaining,
+          receiptSummary,
+          ownerMethod: owner?.preferred_payment_method ?? null,
+          ownerHandle: owner?.payment_handle ?? null,
+          friendLink,
+        })
+      : null;
+
+  return (
+    <div>
+      <div className="h-14 flex items-center px-5 border-b border-line">
+        <Link href="/people" className="text-[13px] text-muted">Back</Link>
+        <h1 className="flex-1 text-center font-semibold text-[15px] text-ink truncate px-2">{person.name}</h1>
+        <div className="w-9" />
+      </div>
+
+      <div className="px-5 pt-5">
+        {person.is_self ? (
+          <div className="mb-6">
+            <span className="text-[11px] font-semibold text-accent bg-[#EFF7F3] px-2 py-1 rounded-full">This is you</span>
+            <p className="text-[13px] text-muted mt-2">You don't owe yourself — your share of receipts is already excluded from totals.</p>
+          </div>
+        ) : (
+          <>
+            <p className="text-[12px] text-muted">Total outstanding</p>
+            <p className={`font-mono text-[26px] font-semibold mb-6 ${totalRemaining > 0.005 ? "text-owe" : "text-accent"}`}>
+              {money(totalRemaining)}
+            </p>
+
+            <Link
+              href={`/payments/new?personId=${person.id}`}
+              className="block text-center rounded-xl bg-accent text-white font-semibold py-3.5 mb-3"
+            >
+              Record payment
+            </Link>
+
+            {reminderLink ? (
+              <a
+                href={reminderLink}
+                className="flex items-center justify-center gap-1.5 rounded-xl border border-line bg-white text-ink font-semibold py-3 text-[14px] mb-7"
+              >
+                <MessageCircle size={16} /> Text {person.first_name || person.name} a reminder
+              </a>
+            ) : totalRemaining > 0.005 ? (
+              <p className="text-[12px] text-muted text-center mb-7">
+                Add {person.first_name || person.name}'s phone number below to send a text reminder.
+              </p>
+            ) : (
+              <div className="mb-7" />
+            )}
+          </>
+        )}
+
+        <PersonActions person={person} allPeople={people} />
+
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Receipts</p>
+        <div className="space-y-2 mb-8">
+          {personReceipts.length === 0 && <p className="text-[13px] text-muted">No receipts yet.</p>}
+          {personReceipts.map(({ receipt, owed }) => (
+            <Link
+              key={receipt.id}
+              href={`/receipts/${receipt.id}`}
+              className="block bg-white rounded-xl border border-line px-4 py-3"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[14px] font-medium text-ink">{receipt.merchant}</span>
+                <span className="font-mono text-[14px] font-semibold text-ink">{money(owed)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-muted">{fmtDate(receipt.date)}</span>
+                <span className={`text-[11px] font-medium ${remainingMap[receipt.id] > 0.005 ? "text-owe" : "text-accent"}`}>
+                  {remainingMap[receipt.id] > 0.005 ? `${money(remainingMap[receipt.id])} due` : "Paid"}
+                </span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <BottomNav />
+    </div>
+  );
+}
+FILEEOF
+
+echo "Files updated. Running tests..."
+npm test
+echo "Now run: git add . && git commit -m \"Add text reminder with payment method and amount owed\" && git push"
