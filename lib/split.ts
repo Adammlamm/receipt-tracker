@@ -9,6 +9,45 @@ export interface PersonShare {
   total: number;
 }
 
+/**
+ * Follows a chain of "covered by" relationships to the final person who actually
+ * pays (e.g. if A is covered by B, and B is covered by C, A resolves to C).
+ * Stops at the first cycle it detects rather than looping forever.
+ */
+function resolveCoverageRoot(personId: string, coverage: Record<string, string>): string {
+  let current = personId;
+  const seen = new Set<string>();
+  while (coverage[current] && !seen.has(current)) {
+    seen.add(current);
+    current = coverage[current];
+  }
+  return current;
+}
+
+/**
+ * Reassigns item shares from a covered person to whoever is covering them, merging
+ * weights when both already share the same item. Used at receipt-save time so a
+ * "Trung is covering Emi's tab" choice becomes a real, permanent reassignment for
+ * this one receipt — Emi remains a fully separate person for every other receipt.
+ */
+export function applyItemCoverage<T extends { personIds: string[]; personUnits?: Record<string, number> }>(
+  items: T[],
+  coverage: Record<string, string>
+): T[] {
+  if (Object.keys(coverage).length === 0) return items;
+  return items.map((item) => {
+    const newPersonIds: string[] = [];
+    const newPersonUnits: Record<string, number> = {};
+    for (const pid of item.personIds) {
+      const root = resolveCoverageRoot(pid, coverage);
+      const weight = item.personUnits?.[pid] ?? 1;
+      if (!newPersonIds.includes(root)) newPersonIds.push(root);
+      newPersonUnits[root] = (newPersonUnits[root] ?? 0) + weight;
+    }
+    return { ...item, personIds: newPersonIds, personUnits: newPersonUnits };
+  });
+}
+
 /** Per-person breakdown of a single receipt: item costs + their share of tax/tip. */
 export function computeReceiptShares(receipt: Receipt): Record<string, PersonShare> {
   const shares: Record<string, PersonShare> = {};

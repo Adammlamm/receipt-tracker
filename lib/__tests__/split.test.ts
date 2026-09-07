@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeReceiptShares, allocatePersonPayments } from "../split";
+import { computeReceiptShares, allocatePersonPayments, applyItemCoverage } from "../split";
 import { buildPaymentLink, supportsPaymentLink, buildReminderSmsLink } from "../paymentLinks";
 import type { Receipt, ReceiptItem, Payment } from "../types";
 
@@ -433,5 +433,69 @@ describe("buildReminderSmsLink", () => {
     });
     const decoded = decodeURIComponent(url);
     expect(decoded).toContain("Pay via : ");
+  });
+});
+
+describe("applyItemCoverage — 'someone is covering someone else' feature", () => {
+  it("reassigns a covered person's share entirely to their coverer", () => {
+    const items = [{ personIds: ["trung", "emi"], personUnits: undefined }];
+    const result = applyItemCoverage(items, { emi: "trung" });
+    expect(result[0].personIds).toEqual(["trung"]);
+    expect(result[0].personUnits).toEqual({ trung: 2 }); // merged weight: trung's own 1 + emi's 1
+  });
+
+  it("leaves items untouched when there's no coverage set", () => {
+    const items = [{ personIds: ["a", "b"], personUnits: { a: 1, b: 1 } }];
+    const result = applyItemCoverage(items, {});
+    expect(result).toBe(items); // same reference — early return, no unnecessary copy
+  });
+
+  it("resolves a chain of coverage to the final payer", () => {
+    // emi covered by trung, trung covered by tammy -> emi's share should land on tammy
+    const items = [{ personIds: ["emi"], personUnits: { emi: 1 } }];
+    const result = applyItemCoverage(items, { emi: "trung", trung: "tammy" });
+    expect(result[0].personIds).toEqual(["tammy"]);
+    expect(result[0].personUnits).toEqual({ tammy: 1 });
+  });
+
+  it("doesn't loop forever if coverage forms a cycle", () => {
+    const items = [{ personIds: ["a", "b"], personUnits: { a: 1, b: 1 } }];
+    // a covered by b, b covered by a — a genuine mistake, but must not hang
+    const result = applyItemCoverage(items, { a: "b", b: "a" });
+    expect(result[0].personIds.length).toBeGreaterThan(0); // just needs to terminate sanely
+  });
+
+  it("only affects the people who actually have coverage set, leaving others alone", () => {
+    const items = [{ personIds: ["a", "b", "c"], personUnits: { a: 1, b: 1, c: 1 } }];
+    const result = applyItemCoverage(items, { b: "a" });
+    expect(result[0].personIds.sort()).toEqual(["a", "c"]);
+    expect(result[0].personUnits).toEqual({ a: 2, c: 1 });
+  });
+
+  it("combines cleanly with the rest of the split math — the covered person ends up owing nothing", () => {
+    const r = {
+      id: "r1",
+      user_id: "u1",
+      merchant: "Test",
+      date: "2026-01-01",
+      subtotal: 40,
+      tax: 0,
+      tip: 0,
+      additional_tip: 0,
+      discount: 0,
+      total: 40,
+      tax_tip_method: "proportional" as const,
+      split_mode: "itemized" as const,
+      category: null,
+      image_path: null,
+      image_mime: null,
+      items: applyItemCoverage(
+        [{ id: "i1", receipt_id: "r1", name: "Dinner", price: 40, quantity: 1, discount: 0, category: "Food" as const, personIds: ["trung", "emi"], personUnits: undefined }],
+        { emi: "trung" }
+      ),
+    };
+    const shares = computeReceiptShares(r);
+    expect(shares.emi).toBeUndefined();
+    expect(shares.trung.total).toBeCloseTo(40);
   });
 });

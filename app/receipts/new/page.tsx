@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Plus, Trash2, X, Sparkles, Loader2, CheckCircle2, AlertTriangle, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { computeReceiptShares } from "@/lib/split";
+import { computeReceiptShares, applyItemCoverage } from "@/lib/split";
 import { Category, Person, Group, TaxTipMethod, ReceiptCategory } from "@/lib/types";
 import { splitName } from "@/lib/utils";
 
@@ -82,6 +82,7 @@ export default function AddReceiptPage() {
   const [tax, setTax] = useState("");
   const [tip, setTip] = useState("");
   const [additionalTip, setAdditionalTip] = useState("");
+  const [coverage, setCoverage] = useState<Record<string, string>>({});
   const [discount, setDiscount] = useState("");
   const [total, setTotal] = useState("");
   const [selectedTipPct, setSelectedTipPct] = useState<number | null>(null);
@@ -309,6 +310,9 @@ export default function AddReceiptPage() {
           .filter((it) => it.name.trim() && Number(it.price) > 0)
           .map((it) => ({ ...it, price: Number(it.price), discount: Number(it.discount) || 0 }));
 
+  const rawParticipantIds = Array.from(new Set(validItems.flatMap((it) => it.personIds)));
+  const coveredItems = applyItemCoverage(validItems, coverage);
+
   const draftReceipt = {
     merchant: merchant.trim() || "Untitled receipt",
     date,
@@ -318,7 +322,7 @@ export default function AddReceiptPage() {
     additional_tip: Number(additionalTip) || 0,
     discount: Number(discount) || 0,
     total: Number(total) || (Number(subtotal) || itemsSum) + (Number(tax) || 0) + (Number(tip) || 0) + (Number(additionalTip) || 0) - (Number(discount) || 0),
-    items: validItems,
+    items: coveredItems,
     tax_tip_method: taxTipMethod,
     split_mode: splitMode,
   };
@@ -396,7 +400,7 @@ export default function AddReceiptPage() {
       }
     }
 
-    for (const item of validItems) {
+    for (const item of coveredItems) {
       const { data: savedItem } = await supabase
         .from("receipt_items")
         .insert({
@@ -870,6 +874,42 @@ export default function AddReceiptPage() {
                 className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${taxTipMethod === "equal" ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
                 Split equally
               </button>
+            </div>
+          )}
+
+          {rawParticipantIds.length > 1 && (
+            <div className="bg-white rounded-xl border border-line p-3.5 mb-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1">Anyone covering for someone else?</p>
+              <p className="text-[11px] text-muted mb-2.5">Their charge folds into whoever's covering them — just for this receipt.</p>
+              <div className="space-y-2">
+                {rawParticipantIds.map((pid) => {
+                  const person = people.find((p) => p.id === pid);
+                  return (
+                    <div key={pid} className="flex items-center justify-between gap-2">
+                      <span className="text-[13px] text-ink">{person?.name}</span>
+                      <select
+                        value={coverage[pid] || ""}
+                        onChange={(e) => {
+                          const next = { ...coverage };
+                          if (e.target.value) next[pid] = e.target.value;
+                          else delete next[pid];
+                          setCoverage(next);
+                        }}
+                        className="rounded-lg border border-line bg-white px-2 py-1.5 text-[12px] outline-none"
+                      >
+                        <option value="">Pays their own share</option>
+                        {rawParticipantIds
+                          .filter((id) => id !== pid)
+                          .map((id) => (
+                            <option key={id} value={id}>
+                              Covered by {people.find((p) => p.id === id)?.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
