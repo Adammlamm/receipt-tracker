@@ -8,6 +8,8 @@ export interface Person {
   id: string;
   user_id: string;
   name: string;
+  first_name: string | null;
+  last_name: string | null;
   is_self: boolean;
   preferred_payment_method: PaymentMethod | null;
   payment_handle: string | null;

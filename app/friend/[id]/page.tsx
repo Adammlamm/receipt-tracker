@@ -28,6 +28,8 @@ interface ReceiptRow {
 
 interface FriendInfo {
   name: string;
+  first_name: string | null;
+  last_name: string | null;
   preferred_payment_method: PaymentMethod | null;
   payment_handle: string | null;
   phone_number: string | null;
@@ -46,7 +48,8 @@ export default function FriendPage() {
   const [notFound, setNotFound] = useState(false);
   const [info, setInfo] = useState<FriendInfo | null>(null);
 
-  const [name, setName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [handle, setHandle] = useState("");
   const [phone, setPhone] = useState("");
@@ -65,7 +68,8 @@ export default function FriendPage() {
         } else {
           const data: FriendInfo = await res.json();
           setInfo(data);
-          setName(data.name);
+          setFirstName(data.first_name || data.name);
+          setLastName(data.last_name || "");
           setMethod(data.preferred_payment_method);
           setHandle(data.payment_handle ?? "");
           setPhone(data.phone_number ?? "");
@@ -86,7 +90,8 @@ export default function FriendPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim() || undefined,
+          first_name: firstName.trim() || undefined,
+          last_name: lastName.trim(),
           preferred_payment_method: method,
           payment_handle: handle.trim() || null,
           phone_number: phone.trim() || null,
@@ -240,11 +245,20 @@ export default function FriendPage() {
         ) : (
           <div className="bg-white rounded-xl border border-line p-4">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Your name</p>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-line bg-white px-3 py-2.5 text-[14px] outline-none focus:ring-2 focus:ring-accent/40 mb-4"
-            />
+            <div className="flex gap-2 mb-4">
+              <input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="First name"
+                className="flex-1 rounded-lg border border-line bg-white px-3 py-2.5 text-[14px] outline-none focus:ring-2 focus:ring-accent/40"
+              />
+              <input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Last name"
+                className="flex-1 rounded-lg border border-line bg-white px-3 py-2.5 text-[14px] outline-none focus:ring-2 focus:ring-accent/40"
+              />
+            </div>
 
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-2">Your preferred payment method</p>
             <div className="flex flex-wrap gap-1.5 mb-3">

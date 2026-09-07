@@ -77,6 +77,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   return NextResponse.json({
     name: person.name,
+    first_name: person.first_name,
+    last_name: person.last_name,
     preferred_payment_method: person.preferred_payment_method,
     payment_handle: person.payment_handle,
     phone_number: person.phone_number,
@@ -103,7 +105,15 @@ export async function POST(request: Request, { params }: { params: { id: string 
   const body = await request.json();
   // Explicit whitelist — never spread the raw body into an update.
   const update: Record<string, any> = {};
-  if (typeof body.name === "string" && body.name.trim()) update.name = body.name.trim().slice(0, 100);
+  if (typeof body.first_name === "string" && body.first_name.trim()) {
+    const first = body.first_name.trim().slice(0, 100);
+    const last = typeof body.last_name === "string" ? body.last_name.trim().slice(0, 100) : "";
+    update.first_name = first;
+    update.last_name = last;
+    update.name = `${first} ${last}`.trim();
+  } else if (typeof body.name === "string" && body.name.trim()) {
+    update.name = body.name.trim().slice(0, 100);
+  }
   if (body.preferred_payment_method === null || ALLOWED_METHODS.includes(body.preferred_payment_method)) {
     update.preferred_payment_method = body.preferred_payment_method;
   }

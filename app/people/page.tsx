@@ -1,21 +1,14 @@
 import Link from "next/link";
-import { Users2, Users } from "lucide-react";
+import { Users2 } from "lucide-react";
 import { loadPeople, loadReceipts, loadPayments } from "@/lib/data";
 import { allocatePersonPayments } from "@/lib/split";
 import BottomNav from "@/components/BottomNav";
 import AddPersonForm from "./AddPersonForm";
-import PersonRow from "./PersonRow";
-import EmptyState from "@/components/EmptyState";
-
-function money(n: number) {
-  return (isFinite(n) ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
-}
+import PeopleList from "./PeopleList";
 
 export default async function PeoplePage() {
   const [people, receipts, payments] = await Promise.all([loadPeople(), loadReceipts(), loadPayments()]);
-  const balances = people
-    .map((p) => ({ person: p, ...allocatePersonPayments(p.id, receipts, payments) }))
-    .sort((a, b) => (a.person.is_self ? -1 : b.person.is_self ? 1 : b.totalRemaining - a.totalRemaining));
+  const balances = people.map((p) => ({ person: p, ...allocatePersonPayments(p.id, receipts, payments) }));
 
   return (
     <div>
@@ -39,13 +32,8 @@ export default async function PeoplePage() {
         </div>
       )}
 
-      <div className="px-5 pt-4 space-y-2">
-        {balances.length === 0 && (
-          <EmptyState icon={Users} title="No people yet" body="Add the people you usually split with above." />
-        )}
-        {balances.map(({ person, totalRemaining }) => (
-          <PersonRow key={person.id} person={person} totalRemaining={totalRemaining} />
-        ))}
+      <div className="px-5 pt-4">
+        <PeopleList balances={balances} />
       </div>
 
       <BottomNav />

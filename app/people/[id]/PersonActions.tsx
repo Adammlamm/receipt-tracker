@@ -12,7 +12,8 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
   const router = useRouter();
   const supabase = createClient();
   const [editingName, setEditingName] = useState(false);
-  const [name, setName] = useState(person.name);
+  const [firstName, setFirstName] = useState(person.first_name || person.name);
+  const [lastName, setLastName] = useState(person.last_name || "");
   const [method, setMethod] = useState<PaymentMethod | null>(person.preferred_payment_method);
   const [handle, setHandle] = useState(person.payment_handle || "");
   const [phone, setPhone] = useState(person.phone_number || "");
@@ -40,8 +41,9 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
   }
 
   async function saveName() {
-    if (!name.trim()) return;
-    await supabase.from("people").update({ name: name.trim() }).eq("id", person.id);
+    if (!firstName.trim()) return;
+    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
+    await supabase.from("people").update({ name: fullName, first_name: firstName.trim(), last_name: lastName.trim() }).eq("id", person.id);
     setEditingName(false);
     router.refresh();
   }
@@ -124,16 +126,38 @@ export default function PersonActions({ person, allPeople }: { person: Person; a
     <div className="mb-6">
       <div className="flex items-center gap-2 mb-1 flex-wrap">
         {editingName ? (
-          <>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="flex-1 rounded-lg border border-line bg-white px-2.5 py-1.5 text-[14px] outline-none"
-              autoFocus
-            />
-            <button onClick={saveName} className="p-1.5 rounded-full bg-accent text-white"><Check size={14} /></button>
-            <button onClick={() => { setEditingName(false); setName(person.name); }} className="p-1.5 rounded-full bg-[#F0EDE1]"><X size={14} className="text-muted" /></button>
-          </>
+          <div className="w-full bg-white rounded-xl border border-line p-3 mb-1">
+            <div className="flex gap-2 mb-2">
+              <input
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="First name"
+                className="flex-1 rounded-lg border border-line px-2.5 py-1.5 text-[14px] outline-none"
+                autoFocus
+              />
+              <input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Last name"
+                className="flex-1 rounded-lg border border-line px-2.5 py-1.5 text-[14px] outline-none"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={saveName} className="flex-1 rounded-lg bg-accent text-white text-[13px] font-semibold py-1.5 flex items-center justify-center gap-1">
+                <Check size={14} /> Save
+              </button>
+              <button
+                onClick={() => {
+                  setEditingName(false);
+                  setFirstName(person.first_name || person.name);
+                  setLastName(person.last_name || "");
+                }}
+                className="px-3 rounded-lg bg-[#F0EDE1] text-[13px] font-semibold"
+              >
+                <X size={14} className="text-muted" />
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             <button onClick={() => setEditingName(true)} className="flex items-center gap-1 text-[12px] text-muted">

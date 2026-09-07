@@ -6,6 +6,7 @@ import { Plus, Trash2, X, CheckCircle2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { computeReceiptShares } from "@/lib/split";
 import { Category, Person, Group, TaxTipMethod, ReceiptCategory } from "@/lib/types";
+import { splitName } from "@/lib/utils";
 
 const CATEGORIES: Category[] = ["Food", "Drinks", "Other"];
 const RECEIPT_CATEGORIES: ReceiptCategory[] = ["Dining", "Trips", "Roommates/Home", "Transportation", "Other"];
@@ -178,7 +179,8 @@ export default function EditReceiptPage() {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
-    const { data } = await supabase.from("people").insert({ user_id: user.id, name: newPersonName.trim() }).select().single();
+    const { first_name, last_name } = splitName(newPersonName);
+    const { data } = await supabase.from("people").insert({ user_id: user.id, name: newPersonName.trim(), first_name, last_name }).select().single();
     if (data) setPeople([...people, data]);
     setNewPersonName("");
   }

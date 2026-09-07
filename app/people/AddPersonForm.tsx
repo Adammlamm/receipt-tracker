@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { splitName } from "@/lib/utils";
 
 export default function AddPersonForm() {
   const [name, setName] = useState("");
@@ -18,7 +19,8 @@ export default function AddPersonForm() {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from("people").insert({ user_id: user.id, name: name.trim() });
+    const { first_name, last_name } = splitName(name);
+    await supabase.from("people").insert({ user_id: user.id, name: name.trim(), first_name, last_name });
     setName("");
     setSaving(false);
     router.refresh();
