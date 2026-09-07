@@ -28,6 +28,7 @@ function receipt(overrides: Partial<Receipt> & { items: ReceiptItem[] }): Receip
     subtotal: overrides.subtotal ?? 0,
     tax: overrides.tax ?? 0,
     tip: overrides.tip ?? 0,
+    additional_tip: overrides.additional_tip ?? 0,
     discount: overrides.discount ?? 0,
     total: overrides.total ?? 0,
     tax_tip_method: overrides.tax_tip_method ?? "proportional",
@@ -90,6 +91,26 @@ describe("computeReceiptShares — itemized mode", () => {
     // tax+tip = $9, split equally two ways = $4.50 each, regardless of who ordered what
     expect(shares.a.taxTip).toBeCloseTo(4.5, 2);
     expect(shares.b.taxTip).toBeCloseTo(4.5, 2);
+  });
+
+  it("adds additional_tip (cash tip on top of what's printed) into the split, same as the receipt's own tip", () => {
+    const r = receipt({
+      subtotal: 30,
+      tax: 3,
+      tip: 6,
+      additional_tip: 10, // e.g. extra cash tip not on the printed receipt
+      total: 49,
+      tax_tip_method: "proportional",
+      items: [
+        item({ id: "i1", price: 20, personIds: ["a"] }),
+        item({ id: "i2", price: 10, personIds: ["b"] }),
+      ],
+    });
+    const shares = computeReceiptShares(r);
+    // tax+tip+additional_tip = $19 total pool, split proportionally 2:1 by subtotal
+    expect(shares.a.total).toBeCloseTo(20 + (19 * (2 / 3)), 2);
+    expect(shares.b.total).toBeCloseTo(10 + (19 * (1 / 3)), 2);
+    expect(sumTotals(shares)).toBeCloseTo(49, 2);
   });
 
   it("splits a shared item's cost by category (food/drinks/other)", () => {

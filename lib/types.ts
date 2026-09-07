@@ -46,6 +46,7 @@ export interface Receipt {
   subtotal: number;
   tax: number;
   tip: number;
+  additional_tip: number;
   discount: number;
   total: number;
   tax_tip_method: TaxTipMethod;

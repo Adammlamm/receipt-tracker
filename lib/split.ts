@@ -54,7 +54,7 @@ export function computeReceiptShares(receipt: Receipt): Record<string, PersonSha
       }
     }
 
-    const taxTip = (Number(receipt.tax) || 0) + (Number(receipt.tip) || 0) - (Number(receipt.discount) || 0);
+    const taxTip = (Number(receipt.tax) || 0) + (Number(receipt.tip) || 0) + (Number(receipt.additional_tip) || 0) - (Number(receipt.discount) || 0);
     const participantIds = Object.keys(shares);
 
     if (receipt.tax_tip_method === "equal" && participantIds.length > 0) {

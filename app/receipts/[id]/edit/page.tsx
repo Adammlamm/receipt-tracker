@@ -44,6 +44,7 @@ export default function EditReceiptPage() {
   const [subtotal, setSubtotal] = useState("");
   const [tax, setTax] = useState("");
   const [tip, setTip] = useState("");
+  const [additionalTip, setAdditionalTip] = useState("");
   const [discount, setDiscount] = useState("");
   const [total, setTotal] = useState("");
   const [selectedTipPct, setSelectedTipPct] = useState<number | null>(null);
@@ -75,6 +76,7 @@ export default function EditReceiptPage() {
       setSubtotal(String(receipt.subtotal ?? ""));
       setTax(String(receipt.tax ?? ""));
       setTip(String(receipt.tip ?? ""));
+      setAdditionalTip(String(receipt.additional_tip ?? ""));
       setDiscount(String(receipt.discount ?? ""));
       setTotal(String(receipt.total ?? ""));
       setTaxTipMethod(receipt.tax_tip_method || "proportional");
@@ -193,7 +195,7 @@ export default function EditReceiptPage() {
             name: "Whole bill",
             price:
               Number(total) ||
-              (Number(subtotal) || 0) + (Number(tax) || 0) + (Number(tip) || 0) - (Number(discount) || 0),
+              (Number(subtotal) || 0) + (Number(tax) || 0) + (Number(tip) || 0) + (Number(additionalTip) || 0) - (Number(discount) || 0),
             discount: 0,
             quantity: 1,
             category: "Other" as Category,
@@ -212,8 +214,9 @@ export default function EditReceiptPage() {
     subtotal: Number(subtotal) || itemsSum,
     tax: Number(tax) || 0,
     tip: Number(tip) || 0,
+    additional_tip: Number(additionalTip) || 0,
     discount: Number(discount) || 0,
-    total: Number(total) || (Number(subtotal) || itemsSum) + (Number(tax) || 0) + (Number(tip) || 0) - (Number(discount) || 0),
+    total: Number(total) || (Number(subtotal) || itemsSum) + (Number(tax) || 0) + (Number(tip) || 0) + (Number(additionalTip) || 0) - (Number(discount) || 0),
     items: validItems,
     tax_tip_method: taxTipMethod,
     split_mode: splitMode,
@@ -243,6 +246,7 @@ export default function EditReceiptPage() {
         subtotal: draftReceipt.subtotal,
         tax: draftReceipt.tax,
         tip: draftReceipt.tip,
+        additional_tip: draftReceipt.additional_tip,
         discount: draftReceipt.discount,
         total: draftReceipt.total,
         tax_tip_method: taxTipMethod,
@@ -335,6 +339,7 @@ export default function EditReceiptPage() {
               ["Subtotal", subtotal, setSubtotal],
               ["Tax", tax, setTax],
               ["Tip", tip, (v: string) => { setTip(v); setSelectedTipPct(null); }],
+              ["Additional tip", additionalTip, setAdditionalTip],
               ["Discount", discount, setDiscount],
             ].map(([label, val, setter]: any) => (
               <div key={label}>
@@ -374,12 +379,12 @@ export default function EditReceiptPage() {
           {(Number(subtotal) > 0 || Number(tax) > 0 || Number(tip) > 0) && (
             <button
               onClick={() => {
-                const calc = Number(subtotal || 0) + Number(tax || 0) + Number(tip || 0) - Number(discount || 0);
+                const calc = Number(subtotal || 0) + Number(tax || 0) + Number(tip || 0) + Number(additionalTip || 0) - Number(discount || 0);
                 setTotal(String(Math.round(calc * 100) / 100));
               }}
               className="text-[12px] text-accent font-medium mb-6"
             >
-              Use calculated total ({money(Number(subtotal || 0) + Number(tax || 0) + Number(tip || 0) - Number(discount || 0))})
+              Use calculated total ({money(Number(subtotal || 0) + Number(tax || 0) + Number(tip || 0) + Number(additionalTip || 0) - Number(discount || 0))})
             </button>
           )}
           {!(Number(subtotal) > 0 || Number(tax) > 0 || Number(tip) > 0) && <div className="mb-6" />}
