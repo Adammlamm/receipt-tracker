@@ -438,7 +438,7 @@ export default function EditReceiptPage() {
             </button>
             <button onClick={() => setSplitMode("even")}
               className={`flex-1 px-3.5 py-3 rounded-xl text-[13px] font-medium border ${splitMode === "even" ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
-              Whole bill, evenly
+              Whole bill
             </button>
           </div>
 
