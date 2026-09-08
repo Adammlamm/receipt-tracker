@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { computeReceiptShares, applyItemCoverage, resolveAdjustments } from "@/lib/split";
 import { Category, Person, Group, TaxTipMethod, ReceiptCategory } from "@/lib/types";
 import { splitName } from "@/lib/utils";
+import PeoplePicker from "@/components/PeoplePicker";
 
 const CATEGORIES: Category[] = ["Food", "Drinks", "Other"];
 const RECEIPT_CATEGORIES: ReceiptCategory[] = ["Dining", "Trips", "Roommates/Home", "Transportation", "Other"];
@@ -83,6 +84,7 @@ export default function AddReceiptPage() {
   const [tip, setTip] = useState("");
   const [additionalTip, setAdditionalTip] = useState("");
   const [coverage, setCoverage] = useState<Record<string, string>>({});
+  const [openPickerFor, setOpenPickerFor] = useState<string | null>(null); // item id, or "participants", or null
   const [discount, setDiscount] = useState("");
   const [total, setTotal] = useState("");
   const [selectedTipPct, setSelectedTipPct] = useState<number | null>(null);
@@ -635,28 +637,19 @@ export default function AddReceiptPage() {
           </div>
 
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Who was there?</p>
-          <div className="flex flex-wrap gap-1.5 mb-4">
-            <button onClick={() => setEvenParticipants([])}
-              className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-white text-owe border-line">
-              Unselect all
-            </button>
-            {people.some((p) => p.is_self) && (
-              <button onClick={() => setEvenParticipants([people.find((p) => p.is_self)!.id])}
-                className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-white text-[#5B5748] border-line">
-                Just me
-              </button>
-            )}
-            <button onClick={() => setEvenParticipants(people.map((p) => p.id))}
-              className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${evenParticipants.length === people.length && people.length > 0 ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
-              Everyone
-            </button>
-            {people.map((p) => (
-              <button key={p.id} onClick={() => setEvenParticipants((cur) => cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id])}
-                className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${evenParticipants.includes(p.id) ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
-                {p.name}
-              </button>
-            ))}
-          </div>
+          <button
+            onClick={() => setOpenPickerFor("participants")}
+            className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl border border-line bg-white text-left mb-4"
+          >
+            <span className="text-[14px] text-ink truncate pr-2">
+              {evenParticipants.length === 0
+                ? "Tap to select who was there"
+                : evenParticipants.length === people.length && people.length > 0
+                ? "Everyone"
+                : evenParticipants.slice(0, 3).map((pid) => people.find((p) => p.id === pid)?.name).join(", ") + (evenParticipants.length > 3 ? ` +${evenParticipants.length - 3}` : "")}
+            </span>
+            <span className="text-[12px] text-accent font-semibold shrink-0">Edit</span>
+          </button>
 
           {evenParticipants.length > 0 && (() => {
             const wholeBillTotal = Number(total) || (Number(subtotal) || 0) + (Number(tax) || 0) + (Number(tip) || 0) + (Number(additionalTip) || 0) - (Number(discount) || 0);
@@ -871,34 +864,19 @@ export default function AddReceiptPage() {
                   ))}
                 </div>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted mb-1.5">Shared by</p>
-                <div className="flex flex-wrap gap-1.5">
-                  <button onClick={() => setItemPeople(it.id, [])}
-                    className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-white text-owe border-line">
-                    Unselect all
-                  </button>
-                  {people.some((p) => p.is_self) && (
-                    <button onClick={() => setItemPeople(it.id, [people.find((p) => p.is_self)!.id])}
-                      className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-white text-[#5B5748] border-line">
-                      Just me
-                    </button>
-                  )}
-                  <button onClick={() => setItemPeople(it.id, people.map((p) => p.id))}
-                    className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${it.personIds.length === people.length && people.length > 0 ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
-                    Everyone
-                  </button>
-                  {groups.map((g) => (
-                    <button key={g.id} onClick={() => setItemPeople(it.id, g.memberIds)}
-                      className="px-3.5 py-2 rounded-full text-[13px] font-medium border bg-[#F0EDE1] text-[#5B5748] border-line">
-                      {g.name}
-                    </button>
-                  ))}
-                  {people.map((p) => (
-                    <button key={p.id} onClick={() => togglePerson(it.id, p.id)}
-                      className={`px-3.5 py-2 rounded-full text-[13px] font-medium border ${it.personIds.includes(p.id) ? "bg-ink text-white border-ink" : "bg-white text-[#5B5748] border-line"}`}>
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
+                <button
+                  onClick={() => setOpenPickerFor(it.id)}
+                  className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl border border-line bg-white text-left"
+                >
+                  <span className="text-[14px] text-ink truncate pr-2">
+                    {it.personIds.length === 0
+                      ? "Tap to select who shared this"
+                      : it.personIds.length === people.length && people.length > 0
+                      ? "Everyone"
+                      : it.personIds.slice(0, 3).map((pid) => people.find((p) => p.id === pid)?.name).join(", ") + (it.personIds.length > 3 ? ` +${it.personIds.length - 3}` : "")}
+                  </span>
+                  <span className="text-[12px] text-accent font-semibold shrink-0">Edit</span>
+                </button>
 
                 {it.personIds.length > 1 && (
                   <div className="mt-3 pt-3 border-t border-[#EDE9DC]">
@@ -1148,6 +1126,27 @@ export default function AddReceiptPage() {
           </button>
         </div>
       )}
+
+      <PeoplePicker
+        isOpen={openPickerFor === "participants"}
+        onClose={() => setOpenPickerFor(null)}
+        people={people}
+        groups={groups}
+        selectedIds={evenParticipants}
+        onToggle={(pid) => setEvenParticipants((cur) => (cur.includes(pid) ? cur.filter((x) => x !== pid) : [...cur, pid]))}
+        onSetAll={setEvenParticipants}
+        title="Who was there?"
+      />
+      <PeoplePicker
+        isOpen={!!openPickerFor && openPickerFor !== "participants"}
+        onClose={() => setOpenPickerFor(null)}
+        people={people}
+        groups={groups}
+        selectedIds={items.find((it) => it.id === openPickerFor)?.personIds ?? []}
+        onToggle={(pid) => openPickerFor && togglePerson(openPickerFor, pid)}
+        onSetAll={(ids) => openPickerFor && setItemPeople(openPickerFor, ids)}
+        title="Who shared this?"
+      />
     </div>
   );
 }
