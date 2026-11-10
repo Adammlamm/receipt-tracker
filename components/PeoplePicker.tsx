@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Search, Check } from "lucide-react";
+import { X, Search, Check, Plus } from "lucide-react";
 import { Person, Group } from "@/lib/types";
 
 export default function PeoplePicker({
@@ -12,6 +12,7 @@ export default function PeoplePicker({
   selectedIds,
   onToggle,
   onSetAll,
+  onAddPerson,
   title = "Who shared this?",
 }: {
   isOpen: boolean;
@@ -21,12 +22,27 @@ export default function PeoplePicker({
   selectedIds: string[];
   onToggle: (personId: string) => void;
   onSetAll: (ids: string[]) => void;
+  onAddPerson?: (name: string) => Promise<Person | null>;
   title?: string;
 }) {
   const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState(false);
   if (!isOpen) return null;
 
   const filtered = people.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
+  const trimmed = query.trim();
+  const exactMatch = people.find((p) => p.name.trim().toLowerCase() === trimmed.toLowerCase());
+
+  async function handleAdd() {
+    if (!onAddPerson || !trimmed || adding) return;
+    setAdding(true);
+    const created = await onAddPerson(trimmed);
+    setAdding(false);
+    if (created) {
+      onToggle(created.id);
+      setQuery("");
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
@@ -74,7 +90,19 @@ export default function PeoplePicker({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 pb-3">
-          {filtered.length === 0 && <p className="text-[13px] text-muted text-center py-6">No matches.</p>}
+          {onAddPerson && trimmed && !exactMatch && (
+            <button
+              onClick={handleAdd}
+              disabled={adding}
+              className="w-full flex items-center gap-2 px-3 py-3 rounded-xl border border-dashed border-accent/50 bg-[#EFF7F3] mb-2 text-left disabled:opacity-60"
+            >
+              <Plus size={16} className="text-accent shrink-0" />
+              <span className="text-[14px] text-accent font-medium truncate">
+                {adding ? "Adding…" : `Add “${trimmed}” as a new person`}
+              </span>
+            </button>
+          )}
+          {filtered.length === 0 && !(onAddPerson && trimmed) && <p className="text-[13px] text-muted text-center py-6">No matches.</p>}
           <div className="space-y-1">
             {filtered.map((p) => {
               const checked = selectedIds.includes(p.id);

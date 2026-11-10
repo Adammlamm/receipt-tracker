@@ -189,6 +189,22 @@ export default function EditReceiptPage() {
     setItems(items.map((it) => (it.category === category ? { ...it, personIds: group.memberIds } : it)));
   }
 
+  async function addPersonFromPicker(name: string): Promise<Person | null> {
+    const clean = name.trim();
+    if (!clean) return null;
+    const existing = people.find((p) => p.name.trim().toLowerCase() === clean.toLowerCase());
+    if (existing) return existing;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { first_name, last_name } = splitName(clean);
+    const { data } = await supabase.from("people").insert({ user_id: user.id, name: clean, first_name, last_name }).select().single();
+    if (!data) return null;
+    setPeople((cur) => [...cur, data]);
+    return data as Person;
+  }
+
   async function addPerson() {
     if (!newPersonName.trim()) return;
     const {
@@ -958,6 +974,7 @@ export default function EditReceiptPage() {
         selectedIds={evenParticipants}
         onToggle={(pid) => setEvenParticipants((cur) => (cur.includes(pid) ? cur.filter((x) => x !== pid) : [...cur, pid]))}
         onSetAll={setEvenParticipants}
+        onAddPerson={addPersonFromPicker}
         title="Who was there?"
       />
       <PeoplePicker
@@ -968,6 +985,7 @@ export default function EditReceiptPage() {
         selectedIds={items.find((it) => it.id === openPickerFor)?.personIds ?? []}
         onToggle={(pid) => openPickerFor && togglePerson(openPickerFor, pid)}
         onSetAll={(ids) => openPickerFor && setItemPeople(openPickerFor, ids)}
+        onAddPerson={addPersonFromPicker}
         title="Who shared this?"
       />
     </div>
